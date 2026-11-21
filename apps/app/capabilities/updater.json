@@ -3,5 +3,6 @@
   "description": "",
   "local": true,
   "webviews": ["main"],
+  "platforms": ["windows", "macOS", "Linux"],
   "permissions": ["updater:default"]
 }
