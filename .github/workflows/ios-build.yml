@@ -66,6 +66,15 @@ jobs:
       - name: Prepare build resources
         run: node scripts/axolotl/prepare-build-resources.mjs
 
+      - name: Initialize iOS project
+        id: init
+        continue-on-error: true
+        shell: bash
+        run: |
+          brew install xcodegen
+          cd apps/app
+          pnpm exec tauri ios init --ci 2>&1 | tee "$RUNNER_TEMP/ios-init.log"
+
       - name: Check theseus for iOS
         id: theseus
         continue-on-error: true
@@ -108,7 +117,20 @@ jobs:
           path: |
             ${{ runner.temp }}/theseus.log
             ${{ runner.temp }}/shell.log
+            ${{ runner.temp }}/ios-init.log
             ${{ runner.temp }}/*.status
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload generated iOS project
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-project
+          path: |
+            apps/app/gen/apple
+            !apps/app/gen/apple/build
           overwrite: true
           retention-days: 7
           if-no-files-found: warn
