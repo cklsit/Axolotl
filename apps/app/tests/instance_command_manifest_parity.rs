@@ -27,7 +27,7 @@ fn java_selection_commands_match_frontend_and_main_window_permissions() {
             .any(|permission| permission == "jre:default")
     );
     assert!(
-        include_str!("../src/main.rs").contains(".plugin(api::jre::init())")
+        include_str!("../src/lib.rs").contains(".plugin(api::jre::init())")
     );
 }
 
@@ -74,7 +74,7 @@ fn third_party_account_commands_are_registered_and_limited_to_main_window() {
             .any(|permission| permission == "third-party-accounts:default")
     );
     assert!(
-        include_str!("../src/main.rs")
+        include_str!("../src/lib.rs")
             .contains(".plugin(api::third_party_accounts::init())")
     );
 }
@@ -236,7 +236,7 @@ fn content_refresh_commands_match_callers_and_events_are_limited_to_the_main_win
     assert!(source.contains("get_webview_window(\"main\")"));
     assert!(source.contains("window.emit(\"resource_content_refresh\""));
     assert!(
-        include_str!("../src/main.rs")
+        include_str!("../src/lib.rs")
             .contains("initialize_content_refresh_events(&app).await?")
     );
     let capability: serde_json::Value =

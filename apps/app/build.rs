@@ -206,21 +206,21 @@ fn build_seed_map_engine() {
     }
 }
 
-/// Commands registered by `tauri::generate_handler!` in `src/main.rs`.
+/// Commands registered by `tauri::generate_handler!` in `src/lib.rs`.
 ///
 /// Tauri only enforces the ACL for application commands when an application
 /// manifest is present. Keeping the list in sync with the handler keeps the
 /// main webview privileged while child webviews, such as theme pack pages,
 /// get no application commands at all.
 fn application_commands() -> &'static [&'static str] {
-    println!("cargo:rerun-if-changed=src/main.rs");
+    println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=permissions/default.toml");
-    let source = std::fs::read_to_string("src/main.rs")
-        .expect("Read src/main.rs for application commands");
+    let source = std::fs::read_to_string("src/lib.rs")
+        .expect("Read src/lib.rs for application commands");
     let marker = "tauri::generate_handler![";
     let open = source
         .find(marker)
-        .expect("Find tauri::generate_handler! in src/main.rs")
+        .expect("Find tauri::generate_handler! in src/lib.rs")
         + marker.len()
         - 1;
     let mut depth = 0usize;
@@ -266,7 +266,7 @@ fn application_commands() -> &'static [&'static str] {
     }
     assert!(
         !commands.is_empty(),
-        "No application commands were found in src/main.rs"
+        "No application commands were found in src/lib.rs"
     );
 
     let permissions = std::fs::read_to_string("permissions/default.toml")

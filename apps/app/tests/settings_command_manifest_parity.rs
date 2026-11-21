@@ -22,7 +22,7 @@ fn network_diagnostics_commands_have_runtime_manifest_and_window_access() {
     );
     assert!(include_str!("../capabilities/plugins.json").contains("\"main\""));
     assert!(
-        include_str!("../src/main.rs")
+        include_str!("../src/lib.rs")
             .contains(".plugin(api::settings::init())")
     );
 }

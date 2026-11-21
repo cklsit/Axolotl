@@ -16,6 +16,12 @@ on:
       - ios/port
     paths:
       - '.github/workflows/ios-build.yml'
+      - 'apps/app/**'
+      - 'packages/app-lib/**'
+      - 'packages/daedalus/**'
+      - 'packages/content-management/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 permissions:
   contents: read
