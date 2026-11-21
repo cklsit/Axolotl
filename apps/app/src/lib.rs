@@ -28,6 +28,10 @@ mod error_dialog;
 #[path = "../../installer-ui/src/executable_install.rs"]
 mod executable_install;
 mod exit_barrier;
+#[cfg(desktop)]
+mod lightweight_mode;
+#[cfg(mobile)]
+#[path = "lightweight_mode_mobile.rs"]
 mod lightweight_mode;
 mod mod_translation;
 mod portable;
