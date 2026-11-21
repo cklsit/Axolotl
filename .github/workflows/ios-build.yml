@@ -1,0 +1,114 @@
+name: iOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Stage to run'
+        required: true
+        default: probe
+        type: choice
+        options:
+          - probe
+          - package
+  push:
+    branches:
+      - ios/port
+    paths:
+      - '.github/workflows/ios-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SQLX_OFFLINE: 'true'
+
+jobs:
+  probe:
+    name: Probe iOS target compilation
+    if: inputs.stage == 'probe' || github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Rust target
+        shell: bash
+        run: |
+          rustup show active-toolchain
+          rustup target add aarch64-apple-ios
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare build resources
+        run: node scripts/axolotl/prepare-build-resources.mjs
+
+      - name: Check theseus for iOS
+        id: theseus
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --target aarch64-apple-ios -p theseus --message-format=short 2>&1 | tee "$RUNNER_TEMP/theseus.log"
+          echo "exit=$?" >> "$RUNNER_TEMP/theseus.status"
+
+      - name: Check theseus_gui for iOS
+        id: shell
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --target aarch64-apple-ios -p theseus_gui --message-format=short 2>&1 | tee "$RUNNER_TEMP/shell.log"
+          echo "exit=$?" >> "$RUNNER_TEMP/shell.status"
+
+      - name: Summarize failures
+        shell: bash
+        run: |
+          for name in theseus shell; do
+            echo "### $name" >> "$GITHUB_STEP_SUMMARY"
+            log="$RUNNER_TEMP/$name.log"
+            if [ -f "$log" ]; then
+              grep -E '^error(\[E[0-9]+\])?:' "$log" | sort | uniq -c | sort -rn | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              grep -E 'error: could not compile' "$log" | head -40 >> "$GITHUB_STEP_SUMMARY" || true
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo 'no log' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-probe-logs
+          path: |
+            ${{ runner.temp }}/theseus.log
+            ${{ runner.temp }}/shell.log
+            ${{ runner.temp }}/*.status
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: warn
