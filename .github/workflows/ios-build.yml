@@ -72,7 +72,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo check --target aarch64-apple-ios -p theseus --message-format=short 2>&1 | tee "$RUNNER_TEMP/theseus.log"
+          cargo check --keep-going --target aarch64-apple-ios -p theseus --message-format=short 2>&1 | tee "$RUNNER_TEMP/theseus.log"
           echo "exit=$?" >> "$RUNNER_TEMP/theseus.status"
 
       - name: Check theseus_gui for iOS
@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo check --target aarch64-apple-ios -p theseus_gui --message-format=short 2>&1 | tee "$RUNNER_TEMP/shell.log"
+          cargo check --keep-going --target aarch64-apple-ios -p theseus_gui --message-format=short 2>&1 | tee "$RUNNER_TEMP/shell.log"
           echo "exit=$?" >> "$RUNNER_TEMP/shell.status"
 
       - name: Summarize failures

@@ -192,6 +192,13 @@ sha2 = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
 
+# keyring 4 compiles its Apple store only when the protected-access feature is
+# enabled for iOS targets, so the store is named again to turn that feature on.
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1.0.1", default-features = false, features = [
+  "protected",
+] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { workspace = true, features = ["blocks", "nw"] }
 libc = { workspace = true }
