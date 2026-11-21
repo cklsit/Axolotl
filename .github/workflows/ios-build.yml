@@ -145,3 +145,111 @@ jobs:
           overwrite: true
           retention-days: 7
           if-no-files-found: warn
+
+  package:
+    name: Package unsigned iOS app
+    if: inputs.stage == 'package'
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Rust target
+        shell: bash
+        run: |
+          rustup show active-toolchain
+          rustup target add aarch64-apple-ios
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          key: ios-aarch64
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare build resources
+        shell: bash
+        run: |
+          resources="$(pwd)/target/build-resources"
+          node scripts/axolotl/prepare-build-resources.mjs --output "$resources"
+          echo "AXOLOTL_BUILD_RESOURCES=$resources" >> "$GITHUB_ENV"
+          node scripts/axolotl/prepare-build-resources.mjs --consume --output "$resources"
+
+      - name: Initialize iOS project
+        shell: bash
+        run: |
+          brew install xcodegen
+          cd apps/app
+          pnpm exec tauri ios init --ci
+          cd ../..
+          node scripts/axolotl/patch-ios-project.mjs
+
+      - name: Build frontend
+        run: pnpm turbo run build --filter=@modrinth/app-frontend
+
+      - name: Build unsigned app
+        shell: bash
+        run: |
+          set -o pipefail
+          cd apps/app
+          pnpm exec tauri ios build --no-sign --debug --target aarch64 2>&1 | tee "$RUNNER_TEMP/ios-build.log"
+
+      - name: Inspect the package
+        shell: bash
+        run: |
+          ipa="$(find apps/app/gen/apple/build -name '*.ipa' -print -quit)"
+          echo "ipa=$ipa" >> "$GITHUB_STEP_SUMMARY"
+          test -n "$ipa"
+          unzip -l "$ipa" | head -40
+          rm -rf "$RUNNER_TEMP/payload"
+          mkdir -p "$RUNNER_TEMP/payload"
+          unzip -q "$ipa" -d "$RUNNER_TEMP/payload"
+          app="$(find "$RUNNER_TEMP/payload/Payload" -maxdepth 1 -name '*.app' -print -quit)"
+          echo "app=$app" >> "$GITHUB_STEP_SUMMARY"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist"
+          if [ -d "$app/_CodeSignature" ]; then
+            echo 'package is signed' >&2
+            exit 1
+          fi
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
+          lipo -archs "$app/$executable"
+          echo "$ipa" > "$RUNNER_TEMP/ipa-path"
+
+      - name: Upload unsigned ipa
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: axolotl-ios-unsigned
+          path: apps/app/gen/apple/build/**/*.ipa
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-package-logs
+          path: ${{ runner.temp }}/ios-build.log
+          overwrite: true
+          retention-days: 7
+          if-no-files-found: warn
