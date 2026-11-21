@@ -11,6 +11,12 @@ license = "GPL-3.0-only"
 # Used in build.rs to compile cubiomes and generate Tauri code and permissions.
 ignored = ["cc", "tauri-build"]
 
+# The mobile host links the launcher as a static library and calls the entry
+# point declared in lib.rs; the desktop binary keeps using main.rs.
+[lib]
+name = "theseus_gui"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [dependencies]
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
 base64 = { workspace = true }
@@ -35,7 +41,6 @@ launcher-observability-mcp = { workspace = true }
 launcher-tools = { workspace = true }
 libc = { workspace = true }
 minisign-verify = { workspace = true }
-native-dialog = { workspace = true }
 notify = { workspace = true }
 paste = { workspace = true }
 quartz_nbt = { workspace = true, features = ["serde"] }
@@ -50,9 +55,6 @@ tauri-plugin-fs = { workspace = true }
 tauri-plugin-http = { workspace = true }
 tauri-plugin-opener = { workspace = true }
 tauri-plugin-os = { workspace = true }
-tauri-plugin-single-instance = { workspace = true }
-tauri-plugin-updater = { workspace = true }
-tauri-plugin-window-state = { workspace = true }
 tempfile = { workspace = true }
 theseus = { workspace = true, features = ["tauri"] }
 thiserror = { workspace = true }
@@ -60,7 +62,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 tokio-util = { workspace = true, features = ["compat", "rt"] }
 tracing = { workspace = true }
 tracing-error = { workspace = true }
-trash = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
@@ -73,7 +74,6 @@ features = [
   "devtools",
   "macos-private-api",
   "protocol-asset",
-  "tray-icon",
   "unstable"
 ]
 
@@ -84,6 +84,21 @@ syn = { version = "2", features = ["full"] }
 [build-dependencies]
 cc = { workspace = true }
 tauri-build = { workspace = true, features = ["codegen"] }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+# Native dialogs and the OS recycle bin have no iOS implementation; the shell
+# reports those failures through the launcher log and removes paths directly.
+native-dialog = { workspace = true }
+trash = { workspace = true }
+# Single-instance handling, the updater, saved window state and the tray icon
+# are desktop integrations that have no iOS counterpart.
+tauri-plugin-single-instance = { workspace = true }
+tauri-plugin-updater = { workspace = true }
+tauri-plugin-window-state = { workspace = true }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies.tauri]
+workspace = true
+features = ["tray-icon"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13.13", default-features = false, features = [

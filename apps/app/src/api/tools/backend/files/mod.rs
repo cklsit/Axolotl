@@ -290,7 +290,9 @@ fn run(
             let staging = tempfile::tempdir().map_err(error)?;
             let staged_root = open_root(staging.path())?;
             dir.rename(&name, &staged_root, &name).map_err(error)?;
-            if let Err(failure) = trash::delete(staging.path().join(&name)) {
+            if let Err(failure) =
+                crate::recycle::recycle(staging.path().join(&name))
+            {
                 if dir.symlink_metadata(&name).is_ok()
                     || staged_root.rename(&name, &dir, &name).is_err()
                 {

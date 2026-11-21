@@ -243,6 +243,16 @@ fn get_common_install_paths() -> HashSet<PathBuf> {
     jre_paths
 }
 
+// Hard paths for locations of commonly installed Java (iOS)
+//
+// iOS users cannot install a JVM, and the sandbox exposes no shared Java
+// directories. The runtime that launches Minecraft ships inside the app
+// container and is resolved by the launcher bridge, so there is nothing to scan.
+#[cfg(target_os = "ios")]
+fn get_common_install_paths() -> HashSet<PathBuf> {
+    HashSet::new()
+}
+
 // Hard paths for locations of commonly installed Java (Mac)
 #[cfg(target_os = "macos")]
 fn get_common_install_paths() -> HashSet<PathBuf> {

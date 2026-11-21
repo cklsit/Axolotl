@@ -116,7 +116,7 @@ pub async fn studio_trash(instance_id: &str, file_path: &str) -> Result<()> {
         ))
         .into());
     }
-    tokio::task::spawn_blocking(move || trash::delete(source))
+    tokio::task::spawn_blocking(move || crate::recycle::recycle(source))
         .await
         .map_err(|error| {
             theseus::Error::from(theseus::ErrorKind::OtherError(format!(

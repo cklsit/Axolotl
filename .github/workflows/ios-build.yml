@@ -60,6 +60,11 @@ jobs:
           rustup show active-toolchain
           rustup target add aarch64-apple-ios
 
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          key: ios-aarch64
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -90,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo check --keep-going --target aarch64-apple-ios -p theseus_gui --message-format=short 2>&1 | tee "$RUNNER_TEMP/shell.log"
+          cargo check --keep-going --target aarch64-apple-ios --lib -p theseus_gui --message-format=short 2>&1 | tee "$RUNNER_TEMP/shell.log"
           echo "exit=$?" >> "$RUNNER_TEMP/shell.status"
 
       - name: Summarize failures
