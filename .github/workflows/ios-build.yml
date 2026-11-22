@@ -211,7 +211,7 @@ jobs:
         run: |
           set -o pipefail
           cd apps/app
-          pnpm exec tauri ios build --no-sign --debug --target aarch64 2>&1 | tee "$RUNNER_TEMP/ios-build.log"
+          pnpm exec tauri ios build --no-sign --target aarch64 2>&1 | tee "$RUNNER_TEMP/ios-build.log"
 
       - name: Inspect the package
         shell: bash
