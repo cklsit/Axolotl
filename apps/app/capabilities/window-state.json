@@ -3,7 +3,7 @@
   "description": "",
   "local": true,
   "webviews": ["main"],
-  "platforms": ["windows", "macOS", "Linux"],
+  "platforms": ["windows", "macOS", "linux"],
   "permissions": [
     "window-state:default",
     "window-state:allow-restore-state",
