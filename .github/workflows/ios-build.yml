@@ -270,8 +270,10 @@ jobs:
           done
           sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
           # The library exports the desktop OpenGL entry points the game calls and
-          # forwards them to the translation layer's own suffixed exports.
+          # forwards them to the translation layer's own suffixed exports. Its
+          # sources import Foundation, so they compile as Objective-C.
           clang -dynamiclib -arch arm64 -isysroot "$sdk" -mios-version-min=16.0 \
+            -x objective-c \
             -I"$source" \
             -F"$runtime_root/Frameworks" -framework libEGL -framework libGLESv2 \
             -Wl,-rpath,@loader_path/../Frameworks \
