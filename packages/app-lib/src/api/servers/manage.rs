@@ -54,6 +54,7 @@ pub async fn get(server_id: &str) -> Result<ServerInfo> {
     Ok(build_server_info(&manifest, &path).await)
 }
 
+#[allow(unreachable_code)]
 pub async fn create(
     name: &str,
     server_type: &str,
@@ -62,6 +63,14 @@ pub async fn create(
     java_path: Option<String>,
     memory_mb: Option<u32>,
 ) -> Result<ServerManifest> {
+    // A server is a separate Java process with a console the platform gives no
+    // way to start, so the launcher reports that instead of failing later.
+    #[cfg(target_os = "ios")]
+    return Err(ErrorKind::InputError(
+        "This platform cannot host a Minecraft server".to_string(),
+    )
+    .as_error());
+
     let name = name.trim();
     if name.is_empty() {
         return Err(ErrorKind::InputError(

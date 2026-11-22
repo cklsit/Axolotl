@@ -24,6 +24,8 @@ mod api;
 mod appimage;
 mod error;
 mod error_dialog;
+#[cfg(target_os = "ios")]
+mod ios_logs;
 #[cfg(windows)]
 #[path = "../../installer-ui/src/executable_install.rs"]
 mod executable_install;
@@ -916,6 +918,8 @@ pub fn run() {
     let tauri_context = tauri::tauri_build_context!();
 
     let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
+    #[cfg(target_os = "ios")]
+    ios_logs::start_mirror(&tauri_context.config().identifier);
     theseus::scheduler::panic::install_panic_hook(
         &tauri_context.config().identifier,
     );

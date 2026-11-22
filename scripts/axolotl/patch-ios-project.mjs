@@ -36,6 +36,16 @@ const projectReplacements = [
             '      - path: LaunchScreen.storyboard',
         ].join('\n'),
     ],
+    // The launcher publishes a copy of its log in the documents directory, which
+    // the file browser can only reach when the application shares documents.
+    [
+        '        LSRequiresIPhoneOS: true',
+        [
+            '        LSRequiresIPhoneOS: true',
+            '        UIFileSharingEnabled: true',
+            '        LSSupportsOpeningDocumentsInPlace: true',
+        ].join('\n'),
+    ],
 ]
 
 const original = await readFile(projectFile, 'utf8')
