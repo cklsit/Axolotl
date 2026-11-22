@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration as StdDuration;
 use tauri::plugin::TauriPlugin;
-use tauri::{Emitter, Manager, Runtime, UserAttentionType};
+use tauri::{Emitter, Manager, Runtime};
+#[cfg(desktop)]
+use tauri::UserAttentionType;
 use tauri_plugin_opener::OpenerExt;
 use theseus::prelude::*;
 use tokio::sync::{mpsc, oneshot};
@@ -209,6 +211,8 @@ pub async fn login<R: Runtime>(
 
     let window = window_builder.build()?;
 
+    // Mobile applications signal attention through the system, not the window.
+    #[cfg(desktop)]
     window.request_user_attention(Some(UserAttentionType::Critical))?;
 
     while (Utc::now() - start) < Duration::minutes(10) {
