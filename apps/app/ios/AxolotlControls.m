@@ -173,9 +173,8 @@ static const size_t kControlCount = sizeof(kControls) / sizeof(kControls[0]);
     }
 }
 
-- (void)pressControl:(NSNumber *)identifier {
-    const AXControlDefinition *control =
-        [self controlAtPoint:[self locationOfTouch:identifier]];
+- (void)pressControl:(NSNumber *)identifier atPoint:(CGPoint)point {
+    const AXControlDefinition *control = [self controlAtPoint:point];
     if (control == NULL) {
         return;
     }
@@ -205,15 +204,6 @@ static const size_t kControlCount = sizeof(kControls) / sizeof(kControls[0]);
     [_held_controls removeObjectForKey:identifier];
 }
 
-- (CGPoint)locationOfTouch:(NSNumber *)identifier {
-    for (UITouch *touch in self.allTouches) {
-        if ([@((uintptr_t)touch) isEqualToNumber:identifier]) {
-            return [touch locationInView:self];
-        }
-    }
-    return CGPointZero;
-}
-
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     for (UITouch *touch in touches) {
         CGPoint point = [touch locationInView:self];
@@ -226,7 +216,7 @@ static const size_t kControlCount = sizeof(kControls) / sizeof(kControls[0]);
             continue;
         }
         if ([self controlAtPoint:point] != NULL) {
-            [self pressControl:identifier];
+            [self pressControl:identifier atPoint:point];
             continue;
         }
         if (_look_touch < 0) {
