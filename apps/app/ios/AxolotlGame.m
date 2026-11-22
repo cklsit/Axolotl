@@ -716,6 +716,17 @@ void axolotl_game_finish(void) {
 
 int axolotl_game_prepare(const char *runtime_directory) {
     @autoreleasepool {
+        // The bundle's own executable carries the name the windowing library
+        // looks for, so the library resolves it as an already loaded image.
+        NSString *bundle = [NSBundle.mainBundle bundlePath];
+        NSString *expected =
+            [bundle stringByAppendingPathComponent:@"AngelAuraAmethyst"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:expected]) {
+            setenv("BUNDLE_PATH", bundle.UTF8String, 1);
+            ax_log(@"The bundle executable serves the windowing library");
+            return 0;
+        }
+
         if (runtime_directory == NULL) {
             return -1;
         }

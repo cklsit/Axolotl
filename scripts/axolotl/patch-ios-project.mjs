@@ -38,12 +38,21 @@ const projectReplacements = [
     ],
     // The launcher publishes a copy of its log in the documents directory, which
     // the file browser can only reach when the application shares documents.
+    // The windowing library the game loads resolves its native side from
+    // `<bundle>/AngelAuraAmethyst`, which is only ever a search of loaded images
+    // when that path is the bundle's own executable. The display name keeps the
+    // launcher's name on the home screen.
+    [
+        '      PRODUCT_NAME: Axolotl Launcher',
+        '      PRODUCT_NAME: AngelAuraAmethyst',
+    ],
     [
         '        LSRequiresIPhoneOS: true',
         [
             '        LSRequiresIPhoneOS: true',
             '        UIFileSharingEnabled: true',
             '        LSSupportsOpeningDocumentsInPlace: true',
+            '        CFBundleDisplayName: Axolotl Launcher',
         ].join('\n'),
     ],
 ]
