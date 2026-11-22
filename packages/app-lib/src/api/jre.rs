@@ -562,6 +562,38 @@ pub async fn find_cached_java(
 pub async fn find_java_for_version(
     major_version: u32,
 ) -> crate::Result<Option<JavaVersion>> {
+    let exact = find_java_for_exact_version(major_version).await?;
+    if exact.is_some() {
+        return Ok(exact);
+    }
+    // A platform that ships one runtime has nothing else to offer: the game runs
+    // on that runtime even where its manifest asks for a different major version.
+    #[cfg(target_os = "ios")]
+    if let Some(java) = bundled_java_runtime().await? {
+        tracing::warn!(
+            requested = major_version,
+            found = java.parsed_version,
+            "The requested Java version is not available on this platform; launching on the bundled runtime"
+        );
+        return Ok(Some(java));
+    }
+    Ok(None)
+}
+
+/// The newest runtime the application itself carries.
+#[cfg(target_os = "ios")]
+async fn bundled_java_runtime() -> crate::Result<Option<JavaVersion>> {
+    let mut available = get_available_jres(false, false, false)
+        .await?
+        .into_iter()
+        .collect::<Vec<_>>();
+    available.sort_by_key(|java| std::cmp::Reverse(java.parsed_version));
+    Ok(available.into_iter().next())
+}
+
+async fn find_java_for_exact_version(
+    major_version: u32,
+) -> crate::Result<Option<JavaVersion>> {
     let state = State::get().await?;
     let documents = documents::Documents::new(&state);
     if let Some(configured) =

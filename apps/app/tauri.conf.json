@@ -26,6 +26,9 @@
         "installerHooks": "./nsis/hooks.nsi"
       }
     },
+    "iOS": {
+      "minimumSystemVersion": "16.0"
+    },
     "longDescription": "",
     "macOS": {
       "entitlements": "App.entitlements",
