@@ -12,10 +12,12 @@ license = "GPL-3.0-only"
 ignored = ["cc", "tauri-build"]
 
 # The mobile host links the launcher as a static library and calls the entry
-# point declared in lib.rs; the desktop binary keeps using main.rs.
+# point declared in lib.rs; the desktop binary keeps using main.rs. A dynamic
+# library is not part of the mobile build, so the launcher only offers a static
+# archive for the host to link.
 [lib]
 name = "theseus_gui"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 async_zip = { workspace = true, features = ["deflate", "tokio-fs"] }
