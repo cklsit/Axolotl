@@ -106,8 +106,6 @@ static BOOL g_initialized;
 
 static UIWindow *g_game_window;
 static AxolotlGameView *g_game_view;
-static NSInteger g_window_width = 854;
-static NSInteger g_window_height = 480;
 
 /// Overlay carrying the on-screen controls, above the drawing surface.
 UIView *axolotl_controls_view(CGRect bounds);
@@ -129,6 +127,17 @@ static void axolotl_show_game_window(void) {
     dispatch_block_t create = ^{
         UIWindow *window =
             [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        // A window created outside the scene hierarchy never becomes visible, so
+        // it joins the scene the launcher itself is presented in.
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]] &&
+                scene.activationState ==
+                    UISceneActivationStateForegroundActive) {
+                window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+                window.frame = [UIScreen mainScreen].bounds;
+                break;
+            }
+        }
         window.windowLevel = UIWindowLevelNormal;
         UIViewController *controller = [[UIViewController alloc] init];
         controller.view.backgroundColor = [UIColor blackColor];
@@ -291,8 +300,12 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
     dispatch_sync(dispatch_get_main_queue(), ^{
         g_game_view.frame = g_game_window.bounds;
         CAMetalLayer *layer = (CAMetalLayer *)g_game_view.layer;
-        layer.drawableSize =
-            CGSizeMake(g_window_width, g_window_height);
+        // The drawing surface covers the screen at the display's own scale; the
+        // game scales its own framebuffer onto it.
+        CGFloat scale = UIScreen.mainScreen.scale;
+        CGSize size = g_game_view.bounds.size;
+        layer.contentsScale = scale;
+        layer.drawableSize = CGSizeMake(size.width * scale, size.height * scale);
     });
 
     window->surface = g_egl.eglCreateWindowSurface(

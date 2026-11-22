@@ -195,6 +195,14 @@ pub fn start(
         std::env::set_var("AXOLOTL_DESKTOP_GL", if desktop_gl { "1" } else { "0" })
     };
 
+    tracing::info!(
+        java_home = %java_home.display(),
+        arguments = argv.len(),
+        desktop_gl,
+        directory = %working_directory.display(),
+        "Starting the game runtime inside the launcher process"
+    );
+
     let (sender, receiver) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("minecraft-runtime".to_string())
