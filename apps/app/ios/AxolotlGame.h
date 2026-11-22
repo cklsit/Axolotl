@@ -10,6 +10,12 @@
 /// exports it as the bundle path. Returns 0 on success.
 int axolotl_game_prepare(const char *runtime_directory);
 
+/// Removes the game window and returns the launcher to the screen.
+///
+/// Call after the runtime returns, whether the game ended normally or the
+/// runtime never started.
+void axolotl_game_finish(void);
+
 #pragma mark - Input
 
 /// Key actions the game understands, matching the windowing library it uses.

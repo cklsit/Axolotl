@@ -25,6 +25,9 @@ unsafe extern "C" {
 
     /// Prepares the directory the game loads the launcher executable through.
     fn axolotl_game_prepare(runtime_directory: *const c_char) -> c_int;
+
+    /// Removes the game window and returns the launcher to the screen.
+    fn axolotl_game_finish();
 }
 
 fn to_cstring(value: &str, what: &str) -> crate::Result<CString> {
@@ -202,6 +205,10 @@ pub fn start(
             // Restoring the output ends the capture, which lets the reader drain
             // the remaining lines and stop.
             capture.restore();
+            // The game window covered the launcher; the session is over.
+            // SAFETY: the helper only touches the window it created on the main
+            // thread.
+            unsafe { axolotl_game_finish() };
             if exit < 0 {
                 tracing::error!(
                     exit,

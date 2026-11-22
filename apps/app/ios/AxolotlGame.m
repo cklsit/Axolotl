@@ -622,6 +622,23 @@ AX_PUBLIC void *Java_org_lwjgl_glfw_CallbackBridge_nativeClipboard(
 
 #pragma mark - Launch preparation
 
+void axolotl_game_finish(void) {
+    dispatch_block_t teardown = ^{
+        if (g_game_window == nil) {
+            return;
+        }
+        g_game_window.hidden = YES;
+        g_game_window.rootViewController = nil;
+        g_game_window = nil;
+        g_game_view = nil;
+    };
+    if ([NSThread isMainThread]) {
+        teardown();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), teardown);
+    }
+}
+
 int axolotl_game_prepare(const char *runtime_directory) {
     @autoreleasepool {
         if (runtime_directory == NULL) {
