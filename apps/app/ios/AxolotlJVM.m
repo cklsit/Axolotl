@@ -1,5 +1,7 @@
 #import "AxolotlJVM.h"
 
+#import <Foundation/Foundation.h>
+
 #include <dlfcn.h>
 #include <signal.h>
 #include <unistd.h>
