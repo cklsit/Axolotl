@@ -464,6 +464,12 @@ fn apply_ios_runtime_arguments(
     if natives.join(provider).is_file() {
         arguments.push(format!("-Dorg.lwjgl.opengl.libname={provider}"));
     }
+
+    // The windowing library the game loads reads its window size and refresh
+    // rate from properties rather than from the platform, and refuses to load
+    // when either is missing.
+    arguments.push("-Dglfw.windowSize=1280x720".to_string());
+    arguments.push("-DUIScreen.maximumFramesPerSecond=60".to_string());
 }
 
 /// Whether the version asks for the OpenGL core profile only the desktop entry
