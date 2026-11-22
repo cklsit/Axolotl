@@ -243,6 +243,23 @@ jobs:
           test -f "$runtime_root/Frameworks/libEGL.framework/libEGL"
           du -sh "$runtime_root/libs" "$runtime_root/natives" "$runtime_root/Frameworks"
 
+      - name: Sign the staged runtime
+        shell: bash
+        run: |
+          runtime_root="$(pwd)/apps/app/gen/apple/GameRuntime"
+          # The runtime ships as code the application loads at run time, so each
+          # binary needs its own signature. Signing happens on the staged files
+          # because the bundle copies them verbatim.
+          find "$runtime_root" -type f \( -name '*.dylib' -o -path '*.framework/lib*' \) -print0 |
+            while IFS= read -r -d '' binary; do
+              codesign --force --sign - --timestamp=none "$binary"
+            done
+          find "$runtime_root" -name '*.dylib' | wc -l
+          codesign --verify --strict "$runtime_root/natives/libgl4es_114.dylib"
+          codesign --verify --strict "$runtime_root/Frameworks/libEGL.framework/libEGL"
+          codesign --verify --strict "$runtime_root/java_runtimes/jre21/lib/libjli.dylib"
+          codesign --verify --strict "$runtime_root/java_runtimes/jre21/lib/server/libjvm.dylib"
+
       - name: Build frontend
         run: pnpm turbo run build --filter=@modrinth/app-frontend
 
@@ -273,6 +290,8 @@ jobs:
           fi
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
           lipo -archs "$app/$executable"
+          echo "$(find "$app" -name '_CodeSignature' -type d | wc -l) signed entries" >> "$GITHUB_STEP_SUMMARY"
+          test "$(find "$app" -name '_CodeSignature' -type d | wc -l)" -gt 0
           echo "$ipa" > "$RUNNER_TEMP/ipa-path"
 
       - name: Upload unsigned ipa
