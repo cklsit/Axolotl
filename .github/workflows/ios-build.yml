@@ -203,7 +203,15 @@ jobs:
           cd ../..
           node scripts/axolotl/patch-ios-project.mjs
 
+      - name: Restore the staged runtime
+        id: runtime-cache
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: apps/app/gen/apple/GameRuntime
+          key: ios-runtime-f98c4133-jre21-1
+
       - name: Stage the game runtime
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           runtime_root="$(pwd)/apps/app/gen/apple/GameRuntime/java_runtimes"
@@ -221,6 +229,7 @@ jobs:
           du -sh "$runtime_root/jre21"
 
       - name: Stage the game libraries
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           commit=f98c4133c72d39e06ceac42b57cc4477c52105fc
@@ -244,6 +253,7 @@ jobs:
           du -sh "$runtime_root/libs" "$runtime_root/natives" "$runtime_root/Frameworks"
 
       - name: Sign the staged runtime
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           runtime_root="$(pwd)/apps/app/gen/apple/GameRuntime"
@@ -259,6 +269,13 @@ jobs:
           codesign --verify --strict "$runtime_root/Frameworks/libEGL.framework/libEGL"
           codesign --verify --strict "$runtime_root/java_runtimes/jre21/lib/libjli.dylib"
           codesign --verify --strict "$runtime_root/java_runtimes/jre21/lib/server/libjvm.dylib"
+
+      - name: Save the staged runtime
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: apps/app/gen/apple/GameRuntime
+          key: ios-runtime-f98c4133-jre21-1
 
       - name: Build frontend
         run: pnpm turbo run build --filter=@modrinth/app-frontend

@@ -99,6 +99,112 @@ pub async fn check_region() -> Status {
     status().await
 }
 
+/// Why the key that signs the official login proof could not be read or written.
+enum ProofKeyError {
+    /// No key has been stored yet.
+    Missing,
+    /// The storage refused the operation.
+    Unavailable(String),
+}
+
+impl From<keyring::Error> for ProofKeyError {
+    fn from(error: keyring::Error) -> Self {
+        match error {
+            keyring::Error::NoEntry => Self::Missing,
+            error => Self::Unavailable(error.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for ProofKeyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => write!(formatter, "the official login key is not stored"),
+            Self::Unavailable(reason) => {
+                write!(formatter, "the official login key is unavailable: {reason}")
+            }
+        }
+    }
+}
+
+/// Reads the key that signs the official login proof.
+///
+/// Desktop platforms keep it in the operating system credential store. iOS only
+/// exposes that store to applications signed with the matching entitlement, so a
+/// side-loaded build keeps the key in its own container instead.
+fn read_proof_key() -> Result<String, ProofKeyError> {
+    #[cfg(not(target_os = "ios"))]
+    {
+        Ok(proof_entry()?.get_password()?)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        match std::fs::read_to_string(proof_key_path()) {
+            Ok(contents) => Ok(contents.trim().to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(ProofKeyError::Missing)
+            }
+            Err(error) => Err(ProofKeyError::Unavailable(error.to_string())),
+        }
+    }
+}
+
+/// Stores the key that signs the official login proof.
+fn write_proof_key(value: &str) -> Result<(), ProofKeyError> {
+    #[cfg(not(target_os = "ios"))]
+    {
+        Ok(proof_entry()?.set_password(value)?)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        let path = proof_key_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| ProofKeyError::Unavailable(error.to_string()))?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|error| ProofKeyError::Unavailable(error.to_string()))?;
+        file.write_all(value.as_bytes())
+            .map_err(|error| ProofKeyError::Unavailable(error.to_string()))
+    }
+}
+
+/// Removes the stored key.
+fn delete_proof_key() -> Result<(), ProofKeyError> {
+    #[cfg(not(target_os = "ios"))]
+    {
+        Ok(proof_entry()?.delete_credential()?)
+    }
+    #[cfg(target_os = "ios")]
+    {
+        match std::fs::remove_file(proof_key_path()) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(ProofKeyError::Missing)
+            }
+            Err(error) => Err(ProofKeyError::Unavailable(error.to_string())),
+        }
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn proof_key_path() -> std::path::PathBuf {
+    crate::prelude::DirectoryInfo::initial_settings_dir_path(
+        crate::brand::BUNDLE_IDENTIFIER,
+    )
+    .map(|directory| directory.join(PROOF_KEY))
+    .unwrap_or_else(|| std::path::PathBuf::from(PROOF_KEY))
+}
+
+#[cfg(not(target_os = "ios"))]
 fn proof_entry() -> Result<keyring::Entry, keyring::Error> {
     keyring::Entry::new(crate::brand::BUNDLE_IDENTIFIER, PROOF_KEY)
 }
@@ -146,8 +252,7 @@ async fn has_proof() -> bool {
     }) else {
         return false;
     };
-    let key =
-        tokio::task::spawn_blocking(|| proof_entry()?.get_password()).await;
+    let key = tokio::task::spawn_blocking(read_proof_key).await;
     let Ok(Ok(key)) = key else {
         tracing::warn!("Official login proof key is unavailable");
         return false;
@@ -211,8 +316,7 @@ pub async fn mark_official_login() -> crate::Result<()> {
     let _guard = PROOF_WRITE.lock().await;
     let state = State::get().await?;
     let key = tokio::task::spawn_blocking(|| {
-        let entry = proof_entry()?;
-        match entry.get_password() {
+        match read_proof_key() {
             Ok(encoded) => {
                 if let Ok(key) =
                     base64::engine::general_purpose::STANDARD.decode(encoded)
@@ -221,15 +325,15 @@ pub async fn mark_official_login() -> crate::Result<()> {
                     return Ok(key);
                 }
             }
-            Err(keyring::Error::NoEntry) => {}
+            Err(ProofKeyError::Missing) => {}
             Err(error) => return Err(error),
         }
         let mut key = vec![0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut key);
-        entry.set_password(
+        write_proof_key(
             &base64::engine::general_purpose::STANDARD.encode(&key),
         )?;
-        Ok::<Vec<u8>, keyring::Error>(key)
+        Ok::<Vec<u8>, ProofKeyError>(key)
     })
     .await
     .map_err(|error| {
@@ -255,14 +359,13 @@ pub async fn clear_official_login() -> crate::Result<()> {
     SESSION_OFFICIAL_LOGIN.store(false, Ordering::Release);
     STATUS_REVISION.fetch_add(1, Ordering::AcqRel);
     drop(_session_guard);
-    let result =
-        tokio::task::spawn_blocking(|| proof_entry()?.delete_credential())
-            .await
-            .map_err(|error| {
-                crate::ErrorKind::OtherError(error.to_string()).as_error()
-            })?;
+    let result = tokio::task::spawn_blocking(delete_proof_key)
+        .await
+        .map_err(|error| {
+            crate::ErrorKind::OtherError(error.to_string()).as_error()
+        })?;
     match result {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(()) | Err(ProofKeyError::Missing) => Ok(()),
         Err(error) => {
             tracing::warn!(%error, "Official login proof was cleared, but its key could not be removed");
             Ok(())
