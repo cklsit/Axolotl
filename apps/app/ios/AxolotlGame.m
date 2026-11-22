@@ -14,6 +14,37 @@
 /// application itself builds with hidden visibility.
 #define AX_PUBLIC __attribute__((visibility("default")))
 
+#pragma mark - Diagnostics
+
+/// Records a step of the graphics bring-up where a device report can find it.
+///
+/// The console a device keeps is out of reach of a file browser, and a failed
+/// context leaves nothing in the launcher log, so the steps land in a file the
+/// documents directory exposes.
+static void ax_log(NSString *message) {
+    static dispatch_once_t once;
+    static NSDateFormatter *formatter;
+    static NSString *path;
+    dispatch_once(&once, ^{
+        formatter = [[NSDateFormatter alloc] init];
+        formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+        path = [NSHomeDirectory()
+            stringByAppendingPathComponent:@"Documents/graphics.log"];
+    });
+    NSString *line = [NSString stringWithFormat:@"%@ %@\n",
+                                                [formatter stringFromDate:[NSDate date]],
+                                                message];
+    NSLog(@"[Axolotl] %@", message);
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (handle == nil) {
+        [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [handle seekToEndOfFile];
+    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [handle closeFile];
+}
+
 #pragma mark - EGL
 
 /// The graphics translation layer exposes the EGL entry points the game asks
@@ -166,15 +197,29 @@ static void axolotl_show_game_window(void) {
 #pragma mark - EGL setup
 
 static void *axolotl_egl_library(void) {
+    NSString *runtime = [[NSBundle mainBundle].bundlePath
+        stringByAppendingPathComponent:@"GameRuntime"];
+    // The desktop entry point bridge re-exports the translation layer's EGL
+    // interface, so loading it brings both into the process. Its own dependency
+    // supplies the EGL symbols when it is present.
+    NSString *bridge = [runtime
+        stringByAppendingPathComponent:@"natives/libtinygl4angle.dylib"];
+    if ([NSFileManager.defaultManager fileExistsAtPath:bridge]) {
+        void *handle = dlopen(bridge.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+        if (handle != NULL) {
+            return handle;
+        }
+        ax_log([NSString stringWithFormat:@"Could not load the desktop GL bridge: %s", dlerror()]);
+    }
     NSString *frameworks =
-        [[NSBundle mainBundle].bundlePath
-            stringByAppendingPathComponent:@"GameRuntime/Frameworks"];
+        [runtime stringByAppendingPathComponent:@"Frameworks"];
     NSString *path =
         [frameworks stringByAppendingPathComponent:@"libEGL.framework/libEGL"];
     void *handle = dlopen(path.UTF8String, RTLD_NOW | RTLD_GLOBAL);
     if (handle == NULL) {
-        NSLog(@"[Axolotl] Could not load the graphics translation layer: %s",
-              dlerror());
+        ax_log([NSString
+            stringWithFormat:@"Could not load the graphics translation layer: %s",
+                             dlerror()]);
     }
     return handle;
 }
@@ -206,10 +251,11 @@ static BOOL axolotl_egl_load(void) {
     g_egl.eglGetCurrentContext =
         (AXGetCurrentContext)dlsym(handle, "eglGetCurrentContext");
     if (g_egl.eglInitialize == NULL || g_egl.eglCreateContext == NULL) {
-        NSLog(@"[Axolotl] The graphics translation layer misses EGL entry points");
+        ax_log(@"The graphics translation layer misses EGL entry points");
         return NO;
     }
     g_egl_ready = YES;
+    ax_log(@"Loaded the graphics translation layer");
     return YES;
 }
 
@@ -222,16 +268,17 @@ static BOOL axolotl_egl_initialize(void) {
     }
     g_display = g_egl.eglGetDisplay(NULL);
     if (g_display == NULL) {
-        NSLog(@"[Axolotl] No EGL display is available");
+        ax_log(@"No EGL display is available");
         return NO;
     }
     int major = 0;
     int minor = 0;
     if (!g_egl.eglInitialize(g_display, &major, &minor)) {
-        NSLog(@"[Axolotl] EGL could not initialize");
+        ax_log(@"EGL could not initialize");
         g_display = NULL;
         return NO;
     }
+    ax_log([NSString stringWithFormat:@"EGL display ready (%d.%d)", major, minor]);
     return YES;
 }
 
@@ -246,9 +293,10 @@ static void axolotl_input_pump(void);
 /// Returns non-zero when the window system is ready for the game.
 AX_PUBLIC int pojavInit(int useStackQueue) {
     (void)useStackQueue;
+    ax_log(@"The game asked for a window system");
     g_initialized = axolotl_egl_initialize();
     if (!g_initialized) {
-        NSLog(@"[Axolotl] The window system could not start");
+        ax_log(@"The window system could not start");
     }
     return g_initialized ? 1 : 0;
 }
@@ -290,12 +338,14 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
     if (!g_egl.eglChooseConfig(g_display, config_attributes, &window->config, 1,
                                &config_count) ||
         config_count < 1) {
-        NSLog(@"[Axolotl] No graphics configuration matches the game");
+        ax_log(@"No graphics configuration matches the game");
         free(window);
         return 0;
     }
 
     g_egl.eglBindAPI(desktop_gl ? AX_EGL_OPENGL_API : AX_EGL_OPENGL_ES_API);
+    ax_log([NSString stringWithFormat:@"Chose a %@ graphics configuration",
+                                      desktop_gl ? @"desktop OpenGL" : @"OpenGL ES"]);
 
     dispatch_sync(dispatch_get_main_queue(), ^{
         g_game_view.frame = g_game_window.bounds;
@@ -311,10 +361,11 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
     window->surface = g_egl.eglCreateWindowSurface(
         g_display, window->config, (__bridge void *)g_game_view.layer, NULL);
     if (window->surface == NULL) {
-        NSLog(@"[Axolotl] The game surface could not be created");
+        ax_log(@"The game surface could not be created");
         free(window);
         return 0;
     }
+    ax_log(@"Created the game surface");
 
     const int context_attributes[] = {
         AX_EGL_CONTEXT_CLIENT_VERSION, 3, AX_EGL_NONE,
@@ -323,13 +374,14 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
     window->context = g_egl.eglCreateContext(g_display, window->config,
                                              share_context, context_attributes);
     if (window->context == NULL) {
-        NSLog(@"[Axolotl] The game context could not be created");
+        ax_log(@"The game context could not be created");
         g_egl.eglDestroySurface(g_display, window->surface);
         free(window);
         return 0;
     }
 
     g_showing_window = (intptr_t)window;
+    ax_log(@"Created the game context");
     return (intptr_t)window;
 }
 
@@ -345,8 +397,9 @@ AX_PUBLIC void pojavMakeCurrent(intptr_t window) {
     if (g_egl.eglMakeCurrent(g_display, render->surface, render->surface,
                              render->context)) {
         g_current_window = render;
+        ax_log(@"Made the game context current");
     } else {
-        NSLog(@"[Axolotl] The game context could not become current");
+        ax_log(@"The game context could not become current");
     }
 }
 
