@@ -716,14 +716,20 @@ void axolotl_game_finish(void) {
 
 int axolotl_game_prepare(const char *runtime_directory) {
     @autoreleasepool {
-        // The bundle's own executable carries the name the windowing library
-        // looks for, so the library resolves it as an already loaded image.
+        // The windowing library loads its native side from the fixed path
+        // `<bundle>/AngelAuraAmethyst`. A link inside the bundle keeps that path
+        // as close to the executable as the platform allows.
         NSString *bundle = [NSBundle.mainBundle bundlePath];
-        NSString *expected =
+        NSString *executable = [NSBundle.mainBundle executablePath];
+        NSString *in_bundle =
             [bundle stringByAppendingPathComponent:@"AngelAuraAmethyst"];
-        if ([NSFileManager.defaultManager fileExistsAtPath:expected]) {
+        if ([NSFileManager.defaultManager fileExistsAtPath:in_bundle] ||
+            [NSFileManager.defaultManager
+                createSymbolicLinkAtPath:in_bundle
+                     withDestinationPath:executable
+                                   error:nil]) {
             setenv("BUNDLE_PATH", bundle.UTF8String, 1);
-            ax_log(@"The bundle executable serves the windowing library");
+            ax_log(@"The bundle path serves the windowing library");
             return 0;
         }
 
@@ -744,7 +750,6 @@ int axolotl_game_prepare(const char *runtime_directory) {
         }
         NSString *link = [directory stringByAppendingPathComponent:
                                          @"AngelAuraAmethyst"];
-        NSString *executable = [NSBundle.mainBundle executablePath];
         if (![NSFileManager.defaultManager
                 createSymbolicLinkAtPath:link
                      withDestinationPath:executable
@@ -757,6 +762,7 @@ int axolotl_game_prepare(const char *runtime_directory) {
             }
         }
         setenv("BUNDLE_PATH", directory.UTF8String, 1);
+        ax_log(@"The runtime directory serves the windowing library");
         return 0;
     }
 }
