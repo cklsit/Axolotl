@@ -203,6 +203,23 @@ jobs:
           cd ../..
           node scripts/axolotl/patch-ios-project.mjs
 
+      - name: Stage the game runtime
+        shell: bash
+        run: |
+          runtime_root="$(pwd)/apps/app/gen/apple/GameRuntime/java_runtimes"
+          mkdir -p "$runtime_root"
+          curl -fsSL -o "$RUNNER_TEMP/jre21.zip" \
+            https://assets.angelauramc.dev/openjdk/ios-arm64/jre21-ios-aarch64.zip
+          unzip -q "$RUNNER_TEMP/jre21.zip" -d "$RUNNER_TEMP/jre21"
+          archive="$(find "$RUNNER_TEMP/jre21" -name '*.tar.xz' -print -quit)"
+          test -n "$archive"
+          mkdir -p "$runtime_root/jre21"
+          tar -xJf "$archive" -C "$runtime_root/jre21" --strip-components=1
+          test -f "$runtime_root/jre21/release"
+          test -f "$runtime_root/jre21/lib/server/libjvm.dylib"
+          test -f "$runtime_root/jre21/lib/libjli.dylib"
+          du -sh "$runtime_root/jre21"
+
       - name: Build frontend
         run: pnpm turbo run build --filter=@modrinth/app-frontend
 

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <jni.h>
-
 /// Starts the bundled Java runtime in this process and runs the given Java
 /// command line.
 ///
