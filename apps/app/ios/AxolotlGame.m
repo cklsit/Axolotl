@@ -226,6 +226,12 @@ static BOOL axolotl_egl_initialize(void) {
 
 #pragma mark - Windowing entry points
 
+/// The window the game draws to, kept for the input it registers.
+static intptr_t g_showing_window;
+
+/// Hands the queued input events to the callbacks the game registered.
+static void axolotl_input_pump(void);
+
 /// Returns non-zero when the window system is ready for the game.
 AX_PUBLIC int pojavInit(int useStackQueue) {
     (void)useStackQueue;
@@ -398,7 +404,6 @@ enum {
 static AXInputEvent g_events[512];
 static int g_event_count;
 static NSLock *g_event_lock;
-static intptr_t g_showing_window;
 static double g_cursor_x = 512;
 static double g_cursor_y = 384;
 
