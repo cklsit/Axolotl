@@ -71,6 +71,8 @@ mod natives;
 mod version_json;
 
 pub mod download;
+#[cfg(target_os = "ios")]
+pub mod ios_jvm;
 pub mod jvm_args;
 pub mod language;
 pub mod local_version;

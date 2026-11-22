@@ -401,16 +401,20 @@ impl ProcessManager {
         } else {
             None
         };
-        let mut mc_proc = mc_command.spawn().map_err(IOError::from)?;
+        #[cfg(not(target_os = "ios"))]
+        let mut runtime =
+            GameRuntime::Process(mc_command.spawn().map_err(IOError::from)?);
+        #[cfg(target_os = "ios")]
+        let mut runtime =
+            GameRuntime::InProcess(Some(start_in_process(&mc_command)?));
         drop(eligibility);
 
-        let stdout = mc_proc.stdout.take();
-        let stderr = mc_proc.stderr.take();
+        let (stdout, stderr) = runtime.take_output();
 
         let mut process = Process {
             metadata: ProcessMetadata {
                 uuid: Uuid::new_v4(),
-                pid: mc_proc.id().unwrap_or_default(),
+                pid: runtime.pid(),
                 maximize_window,
                 window_title,
                 start_time: Utc::now(),
@@ -418,7 +422,7 @@ impl ProcessManager {
                 instance_path: instance_path.to_string(),
                 instance_name: instance_name.to_string(),
             },
-            child: mc_proc,
+            runtime,
             exit_status: tokio::sync::watch::channel(None).0,
             manually_killed: false,
             output_tasks: Vec::new(),
@@ -511,7 +515,7 @@ impl ProcessManager {
             tokio::pin!(initialization);
             tokio::select! {
                 result = &mut initialization => result,
-                exit_status = process.child.wait() => {
+                exit_status = process.runtime.wait() => {
                     let exit_status = exit_status.map_err(IOError::from)?;
                     for output_task in process.output_tasks.drain(..) {
                         if let Err(error) = output_task.await {
@@ -529,7 +533,7 @@ impl ProcessManager {
                     .as_error());
                 }
                 _ = tokio::time::sleep(PROCESS_INITIALIZATION_TIMEOUT) => {
-                    let _ = process.child.kill().await;
+                    let _ = process.runtime.kill().await;
                     record_post_upgrade_launch_best_effort(instance_id, false).await;
                     return Err(crate::ErrorKind::LauncherError(
                         "Minecraft launcher initialization did not respond within 15 seconds. Check the selected Java version and wrapper command."
@@ -541,7 +545,7 @@ impl ProcessManager {
         };
         if let Err(error) = initialization_result {
             tracing::error!("Failed to run post-process init: {error}");
-            let _ = process.child.kill().await;
+            let _ = process.runtime.kill().await;
             record_post_upgrade_launch_best_effort(instance_id, false).await;
             return Err(error);
         }
@@ -620,7 +624,7 @@ impl ProcessManager {
         id: Uuid,
     ) -> crate::Result<Option<Option<ExitStatus>>> {
         if let Some(mut process) = self.processes.get_mut(&id) {
-            match process.child.try_wait() {
+            match process.runtime.try_wait() {
                 Ok(status) => {
                     if let Some(status) = status {
                         process.exit_status.send_replace(Some(Ok(status)));
@@ -663,7 +667,7 @@ impl ProcessManager {
     pub async fn kill(&self, id: Uuid) -> crate::Result<()> {
         {
             if let Some(mut process) = self.processes.get_mut(&id) {
-                process.child.start_kill()?;
+                process.runtime.start_kill()?;
                 process.manually_killed = true;
             }
         }
@@ -697,12 +701,166 @@ pub struct ProcessMetadata {
 #[derive(Debug)]
 struct Process {
     metadata: ProcessMetadata,
-    child: Child,
+    runtime: GameRuntime,
     exit_status: tokio::sync::watch::Sender<Option<Result<ExitStatus, String>>>,
     manually_killed: bool,
     output_tasks: Vec<tokio::task::JoinHandle<()>>,
     _main_class_keep_alive: TempDir,
     rpc_server: RpcServer,
+}
+
+/// How the game runs, which decides what the launcher can do with it.
+///
+/// Desktop platforms own a child process. iOS cannot start one, so the game runs
+/// inside the launcher process and reports an exit status instead.
+#[derive(Debug)]
+enum GameRuntime {
+    Process(Child),
+    #[cfg(target_os = "ios")]
+    InProcess(Option<tokio::sync::oneshot::Receiver<i32>>),
+}
+
+impl GameRuntime {
+    fn pid(&self) -> u32 {
+        match self {
+            Self::Process(child) => child.id().unwrap_or_default(),
+            // The game shares the launcher process on iOS.
+            #[cfg(target_os = "ios")]
+            Self::InProcess(_) => std::process::id(),
+        }
+    }
+
+    fn take_output(&mut self) -> (Option<ChildStdout>, Option<ChildStderr>) {
+        match self {
+            Self::Process(child) => (child.stdout.take(), child.stderr.take()),
+            #[cfg(target_os = "ios")]
+            Self::InProcess(_) => (None, None),
+        }
+    }
+
+    async fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        match self {
+            Self::Process(child) => child.wait().await,
+            #[cfg(target_os = "ios")]
+            Self::InProcess(receiver) => {
+                let code = match receiver.take() {
+                    Some(receiver) => receiver.await.unwrap_or(-1),
+                    None => -1,
+                };
+                Ok(exit_status_from_code(code))
+            }
+        }
+    }
+
+    fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        match self {
+            Self::Process(child) => child.try_wait(),
+            #[cfg(target_os = "ios")]
+            Self::InProcess(receiver) => {
+                let Some(handle) = receiver else {
+                    return Ok(None);
+                };
+                match handle.try_recv() {
+                    Ok(code) => {
+                        *receiver = None;
+                        Ok(Some(exit_status_from_code(code)))
+                    }
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                        Ok(None)
+                    }
+                    Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                        *receiver = None;
+                        Ok(Some(exit_status_from_code(-1)))
+                    }
+                }
+            }
+        }
+    }
+
+    fn start_kill(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Process(child) => child.start_kill(),
+            // The game shares this process; ending it would end the launcher.
+            #[cfg(target_os = "ios")]
+            Self::InProcess(_) => Err(std::io::Error::other(
+                "This platform cannot stop the game without closing the launcher",
+            )),
+        }
+    }
+
+    async fn kill(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Process(child) => child.kill().await,
+            #[cfg(target_os = "ios")]
+            Self::InProcess(_) => Err(std::io::Error::other(
+                "This platform cannot stop the game without closing the launcher",
+            )),
+        }
+    }
+}
+
+/// Builds an exit status for a runtime that reports a status code rather than a
+/// process table entry.
+#[cfg(target_os = "ios")]
+fn exit_status_from_code(code: i32) -> ExitStatus {
+    use std::os::unix::process::ExitStatusExt;
+
+    ExitStatus::from_raw((code & 0xFF) << 8)
+}
+
+/// Starts the game inside the launcher process.
+///
+/// The command the desktop path would spawn already describes everything the
+/// runtime needs, so the launch reads it back instead of rebuilding the command
+/// line. A wrapper command would put another executable first, which this
+/// platform cannot run at all.
+#[cfg(target_os = "ios")]
+fn start_in_process(
+    command: &Command,
+) -> crate::Result<tokio::sync::oneshot::Receiver<i32>> {
+    let command = command.as_std();
+    let program = Path::new(command.get_program());
+    if program.file_name().and_then(|name| name.to_str()) != Some("java") {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "This platform can only start the bundled Java runtime, not {}",
+            program.display()
+        ))
+        .as_error());
+    }
+    let Some(java_home) = program.parent().and_then(Path::parent) else {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "The Java executable does not sit inside a runtime directory: {}",
+            program.display()
+        ))
+        .as_error());
+    };
+
+    let arguments = command
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let environment = command
+        .get_envs()
+        .filter_map(|(key, value)| {
+            value.map(|value| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let working_directory = command
+        .get_current_dir()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+
+    crate::launcher::ios_jvm::start(
+        java_home,
+        program,
+        &arguments,
+        &environment,
+        &working_directory,
+    )
 }
 
 #[derive(Debug, Default, Serialize, Clone)]
@@ -1858,7 +2016,7 @@ mod process_wait_tests {
                     instance_name: "test".into(),
                     start_time: Utc::now(),
                 },
-                child,
+                runtime: GameRuntime::Process(child),
                 exit_status: tokio::sync::watch::channel(None).0,
                 manually_killed: false,
                 output_tasks: Vec::new(),
