@@ -183,6 +183,18 @@ pub fn start(
         .name("minecraft-output".to_string())
         .spawn(move || forward_output(read_fd))?;
 
+    // The window system binds the EGL API that matches the OpenGL entry points
+    // the launch selected, which the command line names.
+    let desktop_gl = arguments.iter().any(|argument| {
+        argument.starts_with("-Dorg.lwjgl.opengl.libname=")
+            && argument.contains("libtinygl4angle")
+    });
+    // SAFETY: launch starts one game per process, and no other thread reads the
+    // environment while the launcher prepares it.
+    unsafe {
+        std::env::set_var("AXOLOTL_DESKTOP_GL", if desktop_gl { "1" } else { "0" })
+    };
+
     let (sender, receiver) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("minecraft-runtime".to_string())

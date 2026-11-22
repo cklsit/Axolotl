@@ -79,7 +79,9 @@ enum {
     AX_EGL_CONTEXT_CLIENT_VERSION = 0x3098,
     AX_EGL_WINDOW_BIT = 0x0004,
     AX_EGL_PBUFFER_BIT = 0x0001,
+    AX_EGL_OPENGL_BIT = 0x0008,
     AX_EGL_OPENGL_ES_API = 0x30A0,
+    AX_EGL_OPENGL_API = 0x30A2,
     AX_EGL_OPENGL_ES3_BIT = 0x0040,
 };
 
@@ -261,11 +263,18 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
         return 0;
     }
 
+    // Versions that ask for a core profile reach the desktop entry points, which
+    // are served by binding the desktop API; the GL to GLES layer takes the ES
+    // API instead.
+    const char *desktop_setting = getenv("AXOLOTL_DESKTOP_GL");
+    BOOL desktop_gl =
+        desktop_setting != NULL && desktop_setting[0] == '1';
     const int config_attributes[] = {
         AX_EGL_RED_SIZE, 8,   AX_EGL_GREEN_SIZE, 8, AX_EGL_BLUE_SIZE, 8,
         AX_EGL_ALPHA_SIZE, 8, AX_EGL_DEPTH_SIZE, 24,
         AX_EGL_SURFACE_TYPE, AX_EGL_WINDOW_BIT | AX_EGL_PBUFFER_BIT,
-        AX_EGL_RENDERABLE_TYPE, AX_EGL_OPENGL_ES3_BIT,
+        AX_EGL_RENDERABLE_TYPE,
+        desktop_gl ? AX_EGL_OPENGL_BIT : AX_EGL_OPENGL_ES3_BIT,
         AX_EGL_NONE,
     };
     int config_count = 0;
@@ -277,7 +286,7 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
         return 0;
     }
 
-    g_egl.eglBindAPI(AX_EGL_OPENGL_ES_API);
+    g_egl.eglBindAPI(desktop_gl ? AX_EGL_OPENGL_API : AX_EGL_OPENGL_ES_API);
 
     dispatch_sync(dispatch_get_main_queue(), ^{
         g_game_view.frame = g_game_window.bounds;

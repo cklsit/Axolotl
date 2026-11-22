@@ -382,7 +382,11 @@ pub(super) fn get_jvm_arguments(
 
     add_fallen_discovery_java_arg(&mut parsed_arguments);
     #[cfg(target_os = "ios")]
-    apply_ios_runtime_arguments(&mut parsed_arguments, class_paths);
+    apply_ios_runtime_arguments(
+        &mut parsed_arguments,
+        class_paths,
+        version_name,
+    );
     Ok(parsed_arguments)
 }
 
@@ -408,6 +412,7 @@ const IOS_RUNTIME_JARS: &[&str] = &[
 fn apply_ios_runtime_arguments(
     arguments: &mut Vec<String>,
     class_paths: &str,
+    version_name: &str,
 ) {
     let Some(runtime_root) = ios_game_runtime_root() else {
         tracing::warn!(
@@ -447,13 +452,34 @@ fn apply_ios_runtime_arguments(
         None => arguments.push(library_path),
     }
 
-    // The OpenGL entry points come from the translation layer rather than the
-    // platform, so LWJGL is told which library provides them.
-    if natives.join("libgl4es_114.dylib").is_file() {
-        arguments.push(
-            "-Dorg.lwjgl.opengl.libname=libgl4es_114.dylib".to_string(),
-        );
+    // The OpenGL entry points come from a translation layer rather than the
+    // platform, so LWJGL is told which library provides them. Versions up to
+    // 1.16 ask for OpenGL 2.1, which the GL to GLES layer serves; later versions
+    // ask for a core profile that only the desktop entry points offer.
+    let provider = if version_needs_core_profile(version_name) {
+        "libtinygl4angle.dylib"
+    } else {
+        "libgl4es_114.dylib"
+    };
+    if natives.join(provider).is_file() {
+        arguments.push(format!("-Dorg.lwjgl.opengl.libname={provider}"));
     }
+}
+
+/// Whether the version asks for the OpenGL core profile only the desktop entry
+/// points provide.
+#[cfg(target_os = "ios")]
+fn version_needs_core_profile(version_name: &str) -> bool {
+    let mut parts = version_name.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u32>().ok())
+        .unwrap_or_default();
+    major > 1 || minor >= 17
 }
 
 /// Directory whose `GameRuntime` folder carries the libraries the launcher
