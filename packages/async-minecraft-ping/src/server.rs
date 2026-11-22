@@ -202,7 +202,9 @@ impl ConnectionConfig {
         (self.address.clone(), self.port)
     }
 
-    #[cfg(feature = "srv")]
+    // The resolver reads the system configuration, which iOS does not expose, so
+    // the caller's address is used as-is there.
+    #[cfg(all(feature = "srv", not(target_os = "ios")))]
     async fn lookup_srv(&self) -> Option<(String, u16)> {
         use hickory_resolver::proto::rr::RData;
         use hickory_resolver::TokioResolver;
@@ -228,6 +230,11 @@ impl ConnectionConfig {
         let port = record.port;
 
         Some((host, port))
+    }
+
+    #[cfg(all(feature = "srv", target_os = "ios"))]
+    async fn lookup_srv(&self) -> Option<(String, u16)> {
+        None
     }
 }
 
