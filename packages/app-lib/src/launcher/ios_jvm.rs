@@ -50,7 +50,6 @@ pub fn start(
     for argument in arguments {
         argv.push(to_cstring(argument, "Java argument")?);
     }
-    let pointers: Vec<*const c_char> = argv.iter().map(|value| value.as_ptr()).collect();
 
     // The command already carries the environment the game runs with. Applying
     // it here keeps the runtime and the launcher on the same process-wide view.
@@ -65,8 +64,12 @@ pub fn start(
         .name("minecraft-runtime".to_string())
         .stack_size(16 * 1024 * 1024)
         .spawn(move || {
-            // SAFETY: every pointer refers to a CString the closure owns for the
-            // whole call, and the bridge only reads them.
+            // The argument pointers are built on this thread because a raw
+            // pointer cannot cross the thread boundary on its own.
+            let pointers: Vec<*const c_char> =
+                argv.iter().map(|value| value.as_ptr()).collect();
+            // SAFETY: every pointer refers to a CString `argv` owns for the whole
+            // call, and the bridge only reads them.
             let exit = unsafe {
                 axolotl_launch_jvm(
                     home.as_ptr(),
