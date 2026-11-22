@@ -3,6 +3,7 @@ use serde::Serialize;
 #[cfg(any(windows, test))]
 mod placement;
 
+#[cfg(desktop)]
 pub(crate) fn present_main_window(
     window: &tauri::Window,
     activate: bool,
@@ -16,6 +17,17 @@ pub(crate) fn present_main_window(
     })
 }
 
+// The mobile host presents its single window when the application activates, so
+// the launcher has nothing to restore or focus.
+#[cfg(mobile)]
+pub(crate) fn present_main_window(
+    _window: &tauri::Window,
+    _activate: bool,
+) -> tauri::Result<()> {
+    Ok(())
+}
+
+#[cfg(desktop)]
 fn present_main_window_on_ui_thread(
     window: &tauri::Window,
     activate: bool,
@@ -46,6 +58,9 @@ fn present_main_window_on_ui_thread(
         crate::startup_phase("main_window_presented");
     }
     if activate {
+        // A mobile window is never minimized independently of the application,
+        // and the window API exposes no unminimize operation there.
+        #[cfg(desktop)]
         if window.is_minimized()? {
             window.unminimize()?;
         }
@@ -153,6 +168,17 @@ fn configure_frame(
     result
 }
 
+// Mobile windows are undecorated and always maximized by the system, so the
+// frame negotiation has nothing to act on and no decoration queries exist.
+#[cfg(mobile)]
+pub async fn apply_frame(
+    _enabled: bool,
+    _window: &tauri::Window,
+) -> Result<FrameResult, String> {
+    Ok(FrameResult::default())
+}
+
+#[cfg(desktop)]
 pub async fn apply_frame(
     enabled: bool,
     window: &tauri::Window,

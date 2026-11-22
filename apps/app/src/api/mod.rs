@@ -25,6 +25,10 @@ pub mod schematics;
 pub mod seed_map;
 pub mod servers;
 pub mod settings;
+#[cfg(desktop)]
+pub mod shortcuts;
+#[cfg(mobile)]
+#[path = "shortcuts_mobile.rs"]
 pub mod shortcuts;
 pub mod storage;
 pub mod system_accent;

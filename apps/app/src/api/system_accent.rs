@@ -199,6 +199,13 @@ fn stop_accent_color_watcher() {
     }
 }
 
+#[cfg(all(
+    not(target_os = "macos"),
+    not(target_os = "windows"),
+    not(target_os = "linux")
+))]
+fn start_accent_color_watcher<R: Runtime>(_app: AppHandle<R>) {}
+
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn stop_accent_color_watcher() {}
 

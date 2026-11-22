@@ -41,6 +41,7 @@ pub enum OS {
     Windows,
     Linux,
     MacOS,
+    IOS,
 }
 
 /// Gets OS
@@ -53,6 +54,8 @@ pub fn get_os() -> OS {
     let os = OS::Linux;
     #[cfg(target_os = "macos")]
     let os = OS::MacOS;
+    #[cfg(target_os = "ios")]
+    let os = OS::IOS;
     os
 }
 

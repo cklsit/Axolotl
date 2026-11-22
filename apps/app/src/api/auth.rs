@@ -167,7 +167,7 @@ pub async fn login<R: Runtime>(
         }})();
         "#,
     );
-    let window = tauri::WebviewWindowBuilder::new(
+    let mut window_builder = tauri::WebviewWindowBuilder::new(
         &app,
         "signin",
         tauri::WebviewUrl::External(flow.auth_request_uri.parse().map_err(
@@ -180,7 +180,6 @@ pub async fn login<R: Runtime>(
         )?),
     )
     .title("Sign into Axolotl Launcher")
-    .always_on_top(true)
     .center()
     .initialization_script(help_bar_script)
     .on_navigation(move |url| {
@@ -200,8 +199,16 @@ pub async fn login<R: Runtime>(
         }
 
         true
-    })
-    .build()?;
+    });
+
+    // A desktop login window floats above the launcher so the sign-in page stays
+    // reachable; iOS presents one window and has no always-on-top level.
+    #[cfg(desktop)]
+    {
+        window_builder = window_builder.always_on_top(true);
+    }
+
+    let window = window_builder.build()?;
 
     window.request_user_attention(Some(UserAttentionType::Critical))?;
 

@@ -533,7 +533,12 @@ pub use updater_impl_noop::*;
 // Toggles decorations
 #[tracing::instrument(skip_all, level = "info")]
 #[tauri::command]
-async fn toggle_decorations(b: bool, window: tauri::Window) -> api::Result<()> {
+async fn toggle_decorations(
+    #[allow(unused_variables)] b: bool,
+    #[allow(unused_variables)] window: tauri::Window,
+) -> api::Result<()> {
+    // Mobile windows have no title bar to toggle.
+    #[cfg(desktop)]
     window.set_decorations(b).map_err(|e| {
         theseus::Error::from(theseus::ErrorKind::OtherError(format!(
             "Failed to toggle decorations: {e}"

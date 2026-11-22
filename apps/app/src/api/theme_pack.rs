@@ -374,6 +374,7 @@ pub async fn theme_pack_open_page<R: Runtime>(
             requires: resolved.page.requires.clone(),
         },
     );
+    #[cfg(desktop)]
     if let Err(error) = webview.window().add_child(
         builder,
         LogicalPosition::new(x, y),
@@ -381,6 +382,16 @@ pub async fn theme_pack_open_page<R: Runtime>(
     ) {
         lock_pages(&state)?.remove(&label);
         return Err(error.into());
+    }
+    // A pack page is an embedded child webview. iOS presents one webview per
+    // window and cannot stack a positioned child inside it.
+    #[cfg(mobile)]
+    {
+        let _ = (builder, webview);
+        lock_pages(&state)?.remove(&label);
+        return Err(theme_error(
+            "Theme pages are not supported on this platform",
+        ));
     }
     Ok(label)
 }
@@ -397,11 +408,17 @@ pub async fn theme_pack_page_bounds<R: Runtime>(
     height: f64,
 ) -> Result<()> {
     page_pack_id(&state, &label)?;
-    let webview = app
-        .get_webview(&label)
-        .ok_or_else(|| theme_error("The theme page is not open"))?;
-    webview.set_position(LogicalPosition::new(x, y))?;
-    webview.set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))?;
+    #[cfg(desktop)]
+    {
+        let webview = app
+            .get_webview(&label)
+            .ok_or_else(|| theme_error("The theme page is not open"))?;
+        webview.set_position(LogicalPosition::new(x, y))?;
+        webview
+            .set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))?;
+    }
+    #[cfg(mobile)]
+    let _ = (app, x, y, width, height);
     Ok(())
 }
 
@@ -414,9 +431,12 @@ pub async fn theme_pack_close_page<R: Runtime>(
 ) -> Result<()> {
     page_pack_id(&state, &label)?;
     lock_pages(&state)?.remove(&label);
+    #[cfg(desktop)]
     if let Some(webview) = app.get_webview(&label) {
         webview.close()?;
     }
+    #[cfg(mobile)]
+    let _ = app;
     Ok(())
 }
 
