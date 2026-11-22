@@ -716,26 +716,13 @@ void axolotl_game_finish(void) {
 
 int axolotl_game_prepare(const char *runtime_directory) {
     @autoreleasepool {
-        // The windowing library loads its native side from the fixed path
-        // `<bundle>/AngelAuraAmethyst`. A link inside the bundle keeps that path
-        // as close to the executable as the platform allows.
-        NSString *bundle = [NSBundle.mainBundle bundlePath];
-        NSString *executable = [NSBundle.mainBundle executablePath];
-        NSString *in_bundle =
-            [bundle stringByAppendingPathComponent:@"AngelAuraAmethyst"];
-        if ([NSFileManager.defaultManager fileExistsAtPath:in_bundle] ||
-            [NSFileManager.defaultManager
-                createSymbolicLinkAtPath:in_bundle
-                     withDestinationPath:executable
-                                   error:nil]) {
-            setenv("BUNDLE_PATH", bundle.UTF8String, 1);
-            ax_log(@"The bundle path serves the windowing library");
-            return 0;
-        }
-
         if (runtime_directory == NULL) {
             return -1;
         }
+        // The windowing library loads its native side from the fixed path
+        // `<bundle path>/AngelAuraAmethyst`. The directory the launch hands over
+        // carries a link with that name, which resolves to the running
+        // executable, so the load finds the image that is already in memory.
         NSString *directory =
             [NSString stringWithUTF8String:runtime_directory];
         NSError *error = nil;
@@ -750,6 +737,7 @@ int axolotl_game_prepare(const char *runtime_directory) {
         }
         NSString *link = [directory stringByAppendingPathComponent:
                                          @"AngelAuraAmethyst"];
+        NSString *executable = [NSBundle.mainBundle executablePath];
         if (![NSFileManager.defaultManager
                 createSymbolicLinkAtPath:link
                      withDestinationPath:executable
