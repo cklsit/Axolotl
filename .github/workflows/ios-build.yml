@@ -208,7 +208,7 @@ jobs:
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: apps/app/gen/apple/GameRuntime
-          key: ios-runtime-f98c4133-jre21-2
+          key: ios-runtime-${{ hashFiles('apps/app/ios/**') }}-f98c4133-jre21
 
       - name: Stage the game runtime
         if: steps.runtime-cache.outputs.cache-hit != 'true'
@@ -328,7 +328,7 @@ jobs:
         uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: apps/app/gen/apple/GameRuntime
-          key: ios-runtime-f98c4133-jre21-2
+          key: ios-runtime-${{ hashFiles('apps/app/ios/**') }}-f98c4133-jre21
 
       - name: Build frontend
         run: pnpm turbo run build --filter=@modrinth/app-frontend
