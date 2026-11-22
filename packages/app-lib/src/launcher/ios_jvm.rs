@@ -22,6 +22,9 @@ unsafe extern "C" {
         argv: *const *const c_char,
         working_directory: *const c_char,
     ) -> c_int;
+
+    /// Prepares the directory the game loads the launcher executable through.
+    fn axolotl_game_prepare(runtime_directory: *const c_char) -> c_int;
 }
 
 fn to_cstring(value: &str, what: &str) -> crate::Result<CString> {
@@ -31,6 +34,25 @@ fn to_cstring(value: &str, what: &str) -> crate::Result<CString> {
         ))
         .as_error()
     })
+}
+
+/// Prepares the directory the game loads the launcher executable through.
+///
+/// The patched windowing library locates its native side under the bundle path
+/// the launcher exports, which has to exist before the runtime starts.
+fn prepare_game_window_runtime() -> crate::Result<()> {
+    let directory = std::env::temp_dir().join("axolotl-runtime");
+    let path = to_cstring(&directory.to_string_lossy(), "runtime directory")?;
+    // SAFETY: the pointer refers to a CString that outlives the call, and the
+    // bridge only reads it.
+    let prepared = unsafe { axolotl_game_prepare(path.as_ptr()) };
+    if prepared != 0 {
+        return Err(crate::ErrorKind::LauncherError(format!(
+            "The game window runtime could not be prepared ({prepared})"
+        ))
+        .as_error());
+    }
+    Ok(())
 }
 
 /// The process output descriptors the game writes to while it runs.
@@ -136,6 +158,7 @@ pub fn start(
     let home = to_cstring(&java_home.to_string_lossy(), "Java runtime path")?;
     let directory =
         to_cstring(&working_directory.to_string_lossy(), "game directory")?;
+    prepare_game_window_runtime()?;
 
     let mut argv = Vec::with_capacity(arguments.len() + 1);
     argv.push(to_cstring(&program.to_string_lossy(), "Java executable")?);

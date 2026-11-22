@@ -1,0 +1,536 @@
+#import "AxolotlGame.h"
+
+#import <Foundation/Foundation.h>
+#import <QuartzCore/CAMetalLayer.h>
+#import <UIKit/UIKit.h>
+
+#include <dlfcn.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+/// The game resolves its windowing and graphics entry points from this image by
+/// name, so every function it looks for has to stay visible even though the
+/// application itself builds with hidden visibility.
+#define AX_PUBLIC __attribute__((visibility("default")))
+
+#pragma mark - EGL
+
+/// The graphics translation layer exposes the EGL entry points the game asks
+/// for. They are resolved once and never unloaded while the game runs.
+typedef void *AXDisplay;
+typedef void *AXConfig;
+typedef void *AXContext;
+typedef void *AXSurface;
+typedef unsigned int AXBoolean;
+
+typedef AXDisplay (*AXGetDisplay)(void *display_id);
+typedef AXBoolean (*AXInitialize)(AXDisplay display, int *major, int *minor);
+typedef AXBoolean (*AXChooseConfig)(AXDisplay display,
+                                    const int *attributes,
+                                    AXConfig *configs,
+                                    int config_size,
+                                    int *count);
+typedef AXSurface (*AXCreateWindowSurface)(AXDisplay display,
+                                           AXConfig config,
+                                           void *window,
+                                           const int *attributes);
+typedef AXContext (*AXCreateContext)(AXDisplay display,
+                                     AXConfig config,
+                                     AXContext share,
+                                     const int *attributes);
+typedef AXBoolean (*AXMakeCurrent)(AXDisplay display,
+                                   AXSurface draw,
+                                   AXSurface read,
+                                   AXContext context);
+typedef AXBoolean (*AXSwapBuffers)(AXDisplay display, AXSurface surface);
+typedef AXBoolean (*AXBindAPI)(unsigned int api);
+typedef int (*AXSwapInterval)(AXDisplay display, int interval);
+typedef AXBoolean (*AXDestroyContext)(AXDisplay display, AXContext context);
+typedef AXBoolean (*AXDestroySurface)(AXDisplay display, AXSurface surface);
+typedef AXBoolean (*AXTerminate)(AXDisplay display);
+typedef AXContext (*AXGetCurrentContext)(void);
+
+typedef struct {
+    AXGetDisplay eglGetDisplay;
+    AXInitialize eglInitialize;
+    AXChooseConfig eglChooseConfig;
+    AXCreateWindowSurface eglCreateWindowSurface;
+    AXCreateContext eglCreateContext;
+    AXMakeCurrent eglMakeCurrent;
+    AXSwapBuffers eglSwapBuffers;
+    AXBindAPI eglBindAPI;
+    AXSwapInterval eglSwapInterval;
+    AXDestroyContext eglDestroyContext;
+    AXDestroySurface eglDestroySurface;
+    AXTerminate eglTerminate;
+    AXGetCurrentContext eglGetCurrentContext;
+} AXEgl;
+
+enum {
+    AX_EGL_ALPHA_SIZE = 0x3021,
+    AX_EGL_BLUE_SIZE = 0x3022,
+    AX_EGL_GREEN_SIZE = 0x3023,
+    AX_EGL_RED_SIZE = 0x3024,
+    AX_EGL_DEPTH_SIZE = 0x3025,
+    AX_EGL_SURFACE_TYPE = 0x3033,
+    AX_EGL_NONE = 0x3038,
+    AX_EGL_RENDERABLE_TYPE = 0x3040,
+    AX_EGL_CONTEXT_CLIENT_VERSION = 0x3098,
+    AX_EGL_WINDOW_BIT = 0x0004,
+    AX_EGL_PBUFFER_BIT = 0x0001,
+    AX_EGL_OPENGL_ES_API = 0x30A0,
+    AX_EGL_OPENGL_ES3_BIT = 0x0040,
+};
+
+static AXEgl g_egl;
+static AXDisplay g_display;
+static BOOL g_egl_ready;
+static BOOL g_initialized;
+
+#pragma mark - Game window
+
+/// Hosts the metal layer the graphics context draws into.
+@interface AxolotlGameView : UIView
+@end
+
+@implementation AxolotlGameView
+
++ (Class)layerClass {
+    return [CAMetalLayer class];
+}
+
+@end
+
+static UIWindow *g_game_window;
+static AxolotlGameView *g_game_view;
+static NSInteger g_window_width = 854;
+static NSInteger g_window_height = 480;
+
+/// A context bundle owns one surface and one context; the game identifies the
+/// window it draws to by this pointer.
+typedef struct {
+    AXConfig config;
+    AXContext context;
+    AXSurface surface;
+} AXRenderWindow;
+
+static __thread AXRenderWindow *g_current_window;
+
+static void axolotl_show_game_window(void) {
+    if (g_game_window != nil) {
+        return;
+    }
+    dispatch_block_t create = ^{
+        UIWindow *window =
+            [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        window.windowLevel = UIWindowLevelNormal;
+        UIViewController *controller = [[UIViewController alloc] init];
+        controller.view.backgroundColor = [UIColor blackColor];
+        AxolotlGameView *view =
+            [[AxolotlGameView alloc] initWithFrame:window.bounds];
+        view.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                UIViewAutoresizingFlexibleHeight;
+        [controller.view addSubview:view];
+        window.rootViewController = controller;
+        window.hidden = NO;
+        [window makeKeyAndVisible];
+        g_game_window = window;
+        g_game_view = view;
+    };
+    if ([NSThread isMainThread]) {
+        create();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), create);
+    }
+}
+
+#pragma mark - EGL setup
+
+static void *axolotl_egl_library(void) {
+    NSString *frameworks =
+        [[NSBundle mainBundle].bundlePath
+            stringByAppendingPathComponent:@"GameRuntime/Frameworks"];
+    NSString *path =
+        [frameworks stringByAppendingPathComponent:@"libEGL.framework/libEGL"];
+    void *handle = dlopen(path.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+    if (handle == NULL) {
+        NSLog(@"[Axolotl] Could not load the graphics translation layer: %s",
+              dlerror());
+    }
+    return handle;
+}
+
+static BOOL axolotl_egl_load(void) {
+    if (g_egl_ready) {
+        return YES;
+    }
+    void *handle = axolotl_egl_library();
+    if (handle == NULL) {
+        return NO;
+    }
+    g_egl.eglGetDisplay = (AXGetDisplay)dlsym(handle, "eglGetDisplay");
+    g_egl.eglInitialize = (AXInitialize)dlsym(handle, "eglInitialize");
+    g_egl.eglChooseConfig = (AXChooseConfig)dlsym(handle, "eglChooseConfig");
+    g_egl.eglCreateWindowSurface =
+        (AXCreateWindowSurface)dlsym(handle, "eglCreateWindowSurface");
+    g_egl.eglCreateContext =
+        (AXCreateContext)dlsym(handle, "eglCreateContext");
+    g_egl.eglMakeCurrent = (AXMakeCurrent)dlsym(handle, "eglMakeCurrent");
+    g_egl.eglSwapBuffers = (AXSwapBuffers)dlsym(handle, "eglSwapBuffers");
+    g_egl.eglBindAPI = (AXBindAPI)dlsym(handle, "eglBindAPI");
+    g_egl.eglSwapInterval = (AXSwapInterval)dlsym(handle, "eglSwapInterval");
+    g_egl.eglDestroyContext =
+        (AXDestroyContext)dlsym(handle, "eglDestroyContext");
+    g_egl.eglDestroySurface =
+        (AXDestroySurface)dlsym(handle, "eglDestroySurface");
+    g_egl.eglTerminate = (AXTerminate)dlsym(handle, "eglTerminate");
+    g_egl.eglGetCurrentContext =
+        (AXGetCurrentContext)dlsym(handle, "eglGetCurrentContext");
+    if (g_egl.eglInitialize == NULL || g_egl.eglCreateContext == NULL) {
+        NSLog(@"[Axolotl] The graphics translation layer misses EGL entry points");
+        return NO;
+    }
+    g_egl_ready = YES;
+    return YES;
+}
+
+static BOOL axolotl_egl_initialize(void) {
+    if (g_display != NULL) {
+        return YES;
+    }
+    if (!axolotl_egl_load()) {
+        return NO;
+    }
+    g_display = g_egl.eglGetDisplay(NULL);
+    if (g_display == NULL) {
+        NSLog(@"[Axolotl] No EGL display is available");
+        return NO;
+    }
+    int major = 0;
+    int minor = 0;
+    if (!g_egl.eglInitialize(g_display, &major, &minor)) {
+        NSLog(@"[Axolotl] EGL could not initialize");
+        g_display = NULL;
+        return NO;
+    }
+    return YES;
+}
+
+#pragma mark - Windowing entry points
+
+/// Returns non-zero when the window system is ready for the game.
+AX_PUBLIC int pojavInit(int useStackQueue) {
+    (void)useStackQueue;
+    g_initialized = axolotl_egl_initialize();
+    if (!g_initialized) {
+        NSLog(@"[Axolotl] The window system could not start");
+    }
+    return g_initialized ? 1 : 0;
+}
+
+AX_PUBLIC void pojavSetWindowHint(int hint, int value) {
+    // GLFW_FRAMEBUFFER_SRGB is not part of the hints the launcher acts on.
+    (void)hint;
+    (void)value;
+}
+
+/// Creates the surface and context the game draws with and returns the window
+/// the game uses to refer to them.
+AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
+    if (!g_initialized && !axolotl_egl_initialize()) {
+        return 0;
+    }
+    axolotl_show_game_window();
+
+    AXRenderWindow *window = calloc(1, sizeof(AXRenderWindow));
+    if (window == NULL) {
+        return 0;
+    }
+
+    const int config_attributes[] = {
+        AX_EGL_RED_SIZE, 8,   AX_EGL_GREEN_SIZE, 8, AX_EGL_BLUE_SIZE, 8,
+        AX_EGL_ALPHA_SIZE, 8, AX_EGL_DEPTH_SIZE, 24,
+        AX_EGL_SURFACE_TYPE, AX_EGL_WINDOW_BIT | AX_EGL_PBUFFER_BIT,
+        AX_EGL_RENDERABLE_TYPE, AX_EGL_OPENGL_ES3_BIT,
+        AX_EGL_NONE,
+    };
+    int config_count = 0;
+    if (!g_egl.eglChooseConfig(g_display, config_attributes, &window->config, 1,
+                               &config_count) ||
+        config_count < 1) {
+        NSLog(@"[Axolotl] No graphics configuration matches the game");
+        free(window);
+        return 0;
+    }
+
+    g_egl.eglBindAPI(AX_EGL_OPENGL_ES_API);
+
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        g_game_view.frame = g_game_window.bounds;
+        CAMetalLayer *layer = (CAMetalLayer *)g_game_view.layer;
+        layer.drawableSize =
+            CGSizeMake(g_window_width, g_window_height);
+    });
+
+    window->surface = g_egl.eglCreateWindowSurface(
+        g_display, window->config, (__bridge void *)g_game_view.layer, NULL);
+    if (window->surface == NULL) {
+        NSLog(@"[Axolotl] The game surface could not be created");
+        free(window);
+        return 0;
+    }
+
+    const int context_attributes[] = {
+        AX_EGL_CONTEXT_CLIENT_VERSION, 3, AX_EGL_NONE,
+    };
+    AXContext share_context = (AXContext)share;
+    window->context = g_egl.eglCreateContext(g_display, window->config,
+                                             share_context, context_attributes);
+    if (window->context == NULL) {
+        NSLog(@"[Axolotl] The game context could not be created");
+        g_egl.eglDestroySurface(g_display, window->surface);
+        free(window);
+        return 0;
+    }
+
+    return (intptr_t)window;
+}
+
+AX_PUBLIC intptr_t pojavGetCurrentContext(void) {
+    return (intptr_t)g_current_window;
+}
+
+AX_PUBLIC void pojavMakeCurrent(intptr_t window) {
+    AXRenderWindow *render = (AXRenderWindow *)window;
+    if (render == NULL) {
+        return;
+    }
+    if (g_egl.eglMakeCurrent(g_display, render->surface, render->surface,
+                             render->context)) {
+        g_current_window = render;
+    } else {
+        NSLog(@"[Axolotl] The game context could not become current");
+    }
+}
+
+AX_PUBLIC void pojavSwapBuffers(intptr_t window) {
+    AXRenderWindow *render = (AXRenderWindow *)window;
+    if (render == NULL || render->surface == NULL) {
+        return;
+    }
+    g_egl.eglSwapBuffers(g_display, render->surface);
+}
+
+AX_PUBLIC void pojavSwapInterval(int interval) {
+    if (g_display != NULL) {
+        g_egl.eglSwapInterval(g_display, interval);
+    }
+}
+
+AX_PUBLIC void pojavPumpEvents(intptr_t window) {
+    (void)window;
+    // Input is delivered by the view's own gestures; a poll has nothing to drain
+    // until the gesture handling is connected.
+}
+
+AX_PUBLIC void pojavRewindEvents(void) {}
+
+AX_PUBLIC void pojavDetachOnCurrentThread(void) {}
+
+AX_PUBLIC void pojavTerminate(void) {
+    if (g_current_window != NULL) {
+        g_egl.eglMakeCurrent(g_display, NULL, NULL, NULL);
+        g_current_window = NULL;
+    }
+    if (g_display != NULL) {
+        g_egl.eglTerminate(g_display);
+        g_display = NULL;
+    }
+    g_initialized = NO;
+}
+
+#pragma mark - Input callbacks
+
+/// The patched windowing library registers its event callbacks through native
+/// methods. They are kept here so the launcher can deliver input events to the
+/// game exactly where the desktop window system would.
+typedef struct {
+    intptr_t character;
+    intptr_t character_mods;
+    intptr_t cursor_enter;
+    intptr_t cursor_position;
+    intptr_t framebuffer_size;
+    intptr_t key;
+    intptr_t mouse_button;
+    intptr_t scroll;
+    intptr_t window_size;
+} AXCallbacks;
+
+static AXCallbacks g_callbacks;
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetCharCallback(void *env,
+                                              void *class_ref,
+                                              long long window,
+                                              long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.character = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetCharModsCallback(void *env,
+                                                  void *class_ref,
+                                                  long long window,
+                                                  long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.character_mods = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetCursorEnterCallback(void *env,
+                                                     void *class_ref,
+                                                     long long window,
+                                                     long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.cursor_enter = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetCursorPosCallback(void *env,
+                                                   void *class_ref,
+                                                   long long window,
+                                                   long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.cursor_position = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetFramebufferSizeCallback(void *env,
+                                                         void *class_ref,
+                                                         long long window,
+                                                         long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.framebuffer_size = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetKeyCallback(void *env,
+                                             void *class_ref,
+                                             long long window,
+                                             long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.key = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetMouseButtonCallback(void *env,
+                                                     void *class_ref,
+                                                     long long window,
+                                                     long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.mouse_button = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetScrollCallback(void *env,
+                                                void *class_ref,
+                                                long long window,
+                                                long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.scroll = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC long long
+Java_org_lwjgl_glfw_GLFW_nglfwSetWindowSizeCallback(void *env,
+                                                    void *class_ref,
+                                                    long long window,
+                                                    long long pointer) {
+    (void)env;
+    (void)class_ref;
+    g_callbacks.window_size = (intptr_t)pointer;
+    return window;
+}
+
+AX_PUBLIC void Java_org_lwjgl_glfw_GLFW_nglfwSetShowingWindow(void *env,
+                                                              void *class_ref,
+                                                              long long window) {
+    (void)env;
+    (void)class_ref;
+    (void)window;
+}
+
+AX_PUBLIC void
+Java_org_lwjgl_glfw_CallbackBridge_nativeSetGrabbing(void *env,
+                                                     void *class_ref,
+                                                     unsigned char grabbing) {
+    (void)env;
+    (void)class_ref;
+    (void)grabbing;
+}
+
+AX_PUBLIC void *Java_org_lwjgl_glfw_CallbackBridge_nativeClipboard(
+    void *env,
+    void *class_ref,
+    int action,
+    void *copy) {
+    (void)env;
+    (void)class_ref;
+    (void)action;
+    (void)copy;
+    return NULL;
+}
+
+#pragma mark - Launch preparation
+
+int axolotl_game_prepare(const char *runtime_directory) {
+    @autoreleasepool {
+        if (runtime_directory == NULL) {
+            return -1;
+        }
+        NSString *directory =
+            [NSString stringWithUTF8String:runtime_directory];
+        NSError *error = nil;
+        if (![NSFileManager.defaultManager
+                createDirectoryAtPath:directory
+          withIntermediateDirectories:YES
+                           attributes:nil
+                                error:&error]) {
+            NSLog(@"[Axolotl] Could not create the runtime directory: %@",
+                  error);
+            return -2;
+        }
+        NSString *link = [directory stringByAppendingPathComponent:
+                                         @"AngelAuraAmethyst"];
+        NSString *executable = [NSBundle.mainBundle executablePath];
+        if (![NSFileManager.defaultManager
+                createSymbolicLinkAtPath:link
+                     withDestinationPath:executable
+                                   error:&error]) {
+            // An existing link is expected on later launches.
+            if (![NSFileManager.defaultManager fileExistsAtPath:link]) {
+                NSLog(@"[Axolotl] Could not link the launcher executable: %@",
+                      error);
+                return -3;
+            }
+        }
+        setenv("BUNDLE_PATH", directory.UTF8String, 1);
+        return 0;
+    }
+}
