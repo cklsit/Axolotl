@@ -447,6 +447,9 @@ watch(oobeVisible, (visible) => {
 const nativeDecorations = ref(false)
 
 const os = ref('')
+// A single-window host exposes no window commands, so the launcher only drives
+// a window where the platform has one.
+const hasWindowChrome = computed(() => os.value !== '' && os.value !== 'IOS')
 const isDevEnvironment = ref(false)
 
 const isMaximized = ref(false)
@@ -454,7 +457,7 @@ const appearanceReady = ref(false)
 const cssWindowBorder = ref(false)
 const windowAppearance = createWindowAppearanceController(
     async (state) => {
-        if (state.os === 'Linux') return
+        if (state.os === 'Linux' || state.os === 'IOS') return
         const window = getCurrentWindow()
         if (state.transparent && state.blur) {
             await window.setEffects({
@@ -865,7 +868,7 @@ onMounted(async () => {
     window.addEventListener('mousedown', handleShortcutMouse, true)
     // Not passive: a bound wheel direction has to keep the page from scrolling.
     window.addEventListener('wheel', handleShortcutWheel, { capture: true, passive: false })
-    unlistenCloseRequested = await getCurrentWindow().onCloseRequested(handleCloseRequested)
+    if (hasWindowChrome.value) unlistenCloseRequested = await getCurrentWindow().onCloseRequested(handleCloseRequested)
     document.body.addEventListener('click', handleClick)
     document.body.addEventListener('auxclick', handleAuxClick)
     window.addEventListener(DIRECT_LINKS_SYNCED_EVENT, handleDirectLinkSyncReport)
@@ -1632,7 +1635,7 @@ async function setupApp() {
     }
 
     nativeDecorations.value = native_decorations
-    if (os.value !== 'MacOS') await getCurrentWindow().setDecorations(native_decorations)
+    if (hasWindowChrome.value) await getCurrentWindow().setDecorations(native_decorations)
 
     themeStore.setThemeState(theme)
     await initializeSystemAccentColor()
@@ -1657,7 +1660,7 @@ async function setupApp() {
     themeStore.setCustomBackgroundClass()
     await applyThemeRuntimeFromSettings(initialSettings)
     await refreshThemePackPages()
-    isMaximized.value = await getCurrentWindow().isMaximized()
+    if (hasWindowChrome.value) isMaximized.value = await getCurrentWindow().isMaximized()
     appearanceReady.value = true
     await applyWindowAppearance()
     themeStore.homeWidgetBackgroundOpacity = home_widget_background_opacity ?? 100
@@ -1706,20 +1709,21 @@ async function setupApp() {
         })
     }
 
-    unlistenWindowResize = await getCurrentWindow().onResized(() => {
-        // Display mode/DPI changes can emit a burst of resize events. Coalesce
-        // them so WebView2 does not receive one IPC request per event.
-        if (maximizedStateTimer) clearTimeout(maximizedStateTimer)
-        maximizedStateTimer = setTimeout(async () => {
-            maximizedStateTimer = undefined
-            try {
-                isMaximized.value = await getCurrentWindow().isMaximized()
-                await applyWindowAppearance()
-            } catch (error) {
-                console.warn('Failed to refresh maximized state after resize', error)
-            }
-        }, 100)
-    })
+    if (hasWindowChrome.value)
+        unlistenWindowResize = await getCurrentWindow().onResized(() => {
+            // Display mode/DPI changes can emit a burst of resize events. Coalesce
+            // them so WebView2 does not receive one IPC request per event.
+            if (maximizedStateTimer) clearTimeout(maximizedStateTimer)
+            maximizedStateTimer = setTimeout(async () => {
+                maximizedStateTimer = undefined
+                try {
+                    isMaximized.value = await getCurrentWindow().isMaximized()
+                    await applyWindowAppearance()
+                } catch (error) {
+                    console.warn('Failed to refresh maximized state after resize', error)
+                }
+            }, 100)
+        })
 
     stopNativeEditMenu?.()
     stopNativeEditMenu = installNativeEditMenuBoundary(!dev)
@@ -1953,7 +1957,7 @@ async function showBackupExitModalIfNeeded() {
 async function exitLauncher(force = false) {
     if (!force && (await showBackupExitModalIfNeeded())) return
     allowWindowClose = true
-    await saveWindowState(StateFlags.ALL)
+    if (hasWindowChrome.value) await saveWindowState(StateFlags.ALL)
     await invoke('exit_app', { force })
 }
 
@@ -1972,7 +1976,7 @@ async function closeWindowImmediately() {
 async function enterLightweightModeOnClose() {
     closeRequestInProgress.value = true
     try {
-        await saveWindowState(StateFlags.ALL)
+        if (hasWindowChrome.value) await saveWindowState(StateFlags.ALL)
         await invoke('lightweight_mode_enter')
     } catch (error) {
         allowWindowClose = false

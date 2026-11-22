@@ -503,6 +503,7 @@ fn frontend_ready() {
     State::mark_frontend_ready();
 }
 
+#[cfg(desktop)]
 #[tracing::instrument(skip_all, level = "info")]
 #[tauri::command]
 async fn set_transparent_window_frame(
@@ -510,6 +511,18 @@ async fn set_transparent_window_frame(
     window: tauri::Window,
 ) -> Result<window_frame::FrameResult, String> {
     window_frame::apply_frame(enabled, &window).await
+}
+
+// Mobile hosts present one undecorated window, so there is no frame to apply
+// and no window handle to resolve for the command.
+#[cfg(mobile)]
+#[tracing::instrument(skip_all, level = "info")]
+#[tauri::command]
+async fn set_transparent_window_frame(
+    enabled: bool,
+) -> Result<window_frame::FrameResult, String> {
+    let _ = enabled;
+    Ok(window_frame::FrameResult::default())
 }
 
 #[tracing::instrument(skip_all, level = "info")]
@@ -531,19 +544,24 @@ pub use updater_impl::*;
 pub use updater_impl_noop::*;
 
 // Toggles decorations
+#[cfg(desktop)]
 #[tracing::instrument(skip_all, level = "info")]
 #[tauri::command]
-async fn toggle_decorations(
-    #[allow(unused_variables)] b: bool,
-    #[allow(unused_variables)] window: tauri::Window,
-) -> api::Result<()> {
-    // Mobile windows have no title bar to toggle.
-    #[cfg(desktop)]
+async fn toggle_decorations(b: bool, window: tauri::Window) -> api::Result<()> {
     window.set_decorations(b).map_err(|e| {
         theseus::Error::from(theseus::ErrorKind::OtherError(format!(
             "Failed to toggle decorations: {e}"
         )))
     })?;
+    Ok(())
+}
+
+// Mobile hosts present one undecorated window, so there is no title bar to
+// toggle and no window handle to resolve for the command.
+#[cfg(mobile)]
+#[tracing::instrument(skip_all, level = "info")]
+#[tauri::command]
+async fn toggle_decorations(_b: bool) -> api::Result<()> {
     Ok(())
 }
 
