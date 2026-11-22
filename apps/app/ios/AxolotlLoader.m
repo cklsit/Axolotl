@@ -21,9 +21,9 @@ static void *axolotl_runtime_library(void) {
     static dispatch_once_t once;
     static void *handle;
     dispatch_once(&once, ^{
-        NSString *path = [[NSBundle.mainBundle.bundlePath
+        NSString *path = [NSBundle.mainBundle.bundlePath
             stringByAppendingPathComponent:
-                [NSString stringWithUTF8String:kRuntimeName]] retain];
+                [NSString stringWithUTF8String:kRuntimeName]];
         handle = dlopen(path.UTF8String, RTLD_NOW | RTLD_GLOBAL);
         if (handle == NULL) {
             NSLog(@"[Axolotl] Could not load the game runtime: %s", dlerror());

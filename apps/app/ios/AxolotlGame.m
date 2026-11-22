@@ -721,7 +721,7 @@ int axolotl_game_prepare(const char *runtime_directory) {
         // and this library is that file, so the bundle's runtime directory is the
         // path it has to open.
         NSString *runtime = [[NSBundle.mainBundle.bundlePath
-            stringByAppendingPathComponent:@"GameRuntime"] retain];
+            stringByAppendingPathComponent:@"GameRuntime"] copy];
         setenv("BUNDLE_PATH", runtime.UTF8String, 1);
         ax_log(@"The game runtime library serves the windowing symbols");
         return 0;
