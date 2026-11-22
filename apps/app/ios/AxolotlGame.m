@@ -409,6 +409,15 @@ AX_PUBLIC void pojavSwapBuffers(intptr_t window) {
         return;
     }
     g_egl.eglSwapBuffers(g_display, render->surface);
+    // A swap is the only proof the game reached drawing code, so the first frame
+    // and then every few hundred are recorded.
+    static int swaps;
+    swaps++;
+    if (swaps == 1) {
+        ax_log(@"The game presented its first frame");
+    } else if (swaps % 600 == 0) {
+        ax_log([NSString stringWithFormat:@"The game presented %d frames", swaps]);
+    }
 }
 
 AX_PUBLIC void pojavSwapInterval(int interval) {
@@ -534,6 +543,15 @@ static void axolotl_input_pump(void) {
         [g_event_lock unlock];
     }
     void *window = (void *)g_showing_window;
+    if (count > 0) {
+        static int delivered;
+        delivered += count;
+        if (delivered == count) {
+            ax_log([NSString stringWithFormat:
+                                @"The game received its first %d input events",
+                                count]);
+        }
+    }
     for (int index = 0; index < count; index++) {
         AXInputEvent event = batch[index];
         switch (event.type) {
