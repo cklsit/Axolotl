@@ -192,6 +192,11 @@ sha2 = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
 
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+# Reading the system resolver configuration reaches macOS-only frameworks the
+# iOS SDK does not ship, so only desktop builds enable that source.
+hickory-resolver = { workspace = true, features = ["system-config"] }
+
 # keyring 4 compiles its Apple store only when the protected-access feature is
 # enabled for iOS targets, so the store is named again to turn that feature on.
 [target.'cfg(target_os = "ios")'.dependencies]

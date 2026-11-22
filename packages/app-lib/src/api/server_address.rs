@@ -148,25 +148,35 @@ pub async fn resolve_server_address(
     }
 
     let _permit = SIMULTANEOUS_DNS_QUERIES.acquire().await?;
+    Ok(lookup_srv(host)
+        .await?
+        .unwrap_or_else(|| (host.to_owned(), port)))
+}
+
+/// Resolves the `_minecraft._tcp` service record a server address may point at.
+///
+/// The resolver is built from the system configuration, which iOS does not
+/// expose, so addresses keep the port the user typed there.
+#[cfg(not(target_os = "ios"))]
+async fn lookup_srv(host: &str) -> Result<Option<(String, u16)>> {
     let resolver = hickory_resolver::TokioResolver::builder_tokio()?.build()?;
-    Ok(
-        match resolver.srv_lookup(format!("_minecraft._tcp.{host}")).await {
-            Err(e) if e.is_no_records_found() => None,
-            Err(e) => return Err(e.into()),
-            Ok(lookup) => {
-                lookup
-                    .answers()
-                    .iter()
-                    .find_map(|record| match &record.data {
-                        hickory_resolver::proto::rr::RData::SRV(srv) => {
-                            Some((srv.target.to_string(), srv.port))
-                        }
-                        _ => None,
-                    })
+    Ok(match resolver.srv_lookup(format!("_minecraft._tcp.{host}")).await {
+        Err(e) if e.is_no_records_found() => None,
+        Err(e) => return Err(e.into()),
+        Ok(lookup) => lookup.answers().iter().find_map(|record| {
+            match &record.data {
+                hickory_resolver::proto::rr::RData::SRV(srv) => {
+                    Some((srv.target.to_string(), srv.port))
+                }
+                _ => None,
             }
-        }
-        .unwrap_or_else(|| (host.to_owned(), port)),
-    )
+        }),
+    })
+}
+
+#[cfg(target_os = "ios")]
+async fn lookup_srv(_host: &str) -> Result<Option<(String, u16)>> {
+    Ok(None)
 }
 
 #[cfg(test)]
