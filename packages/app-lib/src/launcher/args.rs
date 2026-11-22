@@ -468,18 +468,42 @@ fn apply_ios_runtime_arguments(
 
 /// Whether the version asks for the OpenGL core profile only the desktop entry
 /// points provide.
+///
+/// A loader names the version it builds, so the candidate that starts with `1.`
+/// is the game version and decides; everything else in the identifier belongs to
+/// the loader.
 #[cfg(target_os = "ios")]
 fn version_needs_core_profile(version_name: &str) -> bool {
-    let mut parts = version_name.split('.');
-    let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok())
-    else {
-        return false;
-    };
-    let minor = parts
-        .next()
-        .and_then(|part| part.parse::<u32>().ok())
-        .unwrap_or_default();
-    major > 1 || minor >= 17
+    let bytes = version_name.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() {
+            let major_start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            let major = version_name[major_start..index].parse::<u32>();
+            if index < bytes.len() && bytes[index] == b'.' {
+                let minor_start = index + 1;
+                let mut minor_end = minor_start;
+                while minor_end < bytes.len() && bytes[minor_end].is_ascii_digit()
+                {
+                    minor_end += 1;
+                }
+                if let (Ok(major), Ok(minor)) = (
+                    major,
+                    version_name[minor_start..minor_end].parse::<u32>(),
+                ) && major == 1
+                {
+                    return minor >= 17;
+                }
+                index = minor_end;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    false
 }
 
 /// Directory whose `GameRuntime` folder carries the libraries the launcher
