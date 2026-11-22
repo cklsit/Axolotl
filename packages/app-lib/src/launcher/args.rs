@@ -381,7 +381,88 @@ pub(super) fn get_jvm_arguments(
     }
 
     add_fallen_discovery_java_arg(&mut parsed_arguments);
+    #[cfg(target_os = "ios")]
+    apply_ios_runtime_arguments(&mut parsed_arguments, class_paths);
     Ok(parsed_arguments)
+}
+
+/// Libraries the game runtime uses instead of the desktop graphics and input
+/// stack it describes.
+///
+/// Minecraft's libraries assume an operating system window and a native OpenGL
+/// driver. iOS has neither: the patched LWJGL in front of the class path talks
+/// to the launcher for windows and input, and the OpenGL calls reach a
+/// translation layer. The application ships both, so the launch points at them.
+#[cfg(target_os = "ios")]
+const IOS_RUNTIME_JARS: &[&str] = &[
+    "lwjgl.jar",
+    "lwjgl-glfw.jar",
+    "lwjgl-opengl.jar",
+    "lwjgl-openal.jar",
+    "lwjgl-stb.jar",
+    "lwjgl-tinyfd.jar",
+    "lwjgl-freetype.jar",
+];
+
+#[cfg(target_os = "ios")]
+fn apply_ios_runtime_arguments(
+    arguments: &mut Vec<String>,
+    class_paths: &str,
+) {
+    let Some(runtime_root) = ios_game_runtime_root() else {
+        tracing::warn!(
+            "The game runtime directory could not be resolved; the launch keeps the desktop libraries"
+        );
+        return;
+    };
+    let libraries = runtime_root.join("libs");
+    let natives = runtime_root.join("natives");
+
+    let jars: Vec<String> = IOS_RUNTIME_JARS
+        .iter()
+        .map(|name| libraries.join(name))
+        .filter(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    if !jars.is_empty() {
+        let mut class_path = jars.join(":");
+        class_path.push(':');
+        class_path.push_str(class_paths);
+        match arguments.iter().position(|argument| argument == "-cp") {
+            Some(index) if index + 1 < arguments.len() => {
+                arguments[index + 1] = class_path;
+            }
+            _ => {
+                arguments.push("-cp".to_string());
+                arguments.push(class_path);
+            }
+        }
+    }
+
+    let library_path = format!("-Djava.library.path={}", natives.display());
+    match arguments.iter().position(|argument| {
+        argument.starts_with("-Djava.library.path=")
+    }) {
+        Some(index) => arguments[index] = library_path,
+        None => arguments.push(library_path),
+    }
+
+    // The OpenGL entry points come from the translation layer rather than the
+    // platform, so LWJGL is told which library provides them.
+    if natives.join("libgl4es_114.dylib").is_file() {
+        arguments.push(
+            "-Dorg.lwjgl.opengl.libname=libgl4es_114.dylib".to_string(),
+        );
+    }
+}
+
+/// Directory whose `GameRuntime` folder carries the libraries the launcher
+/// ships for the game, resolved from the running executable as on every iOS
+/// bundle.
+#[cfg(target_os = "ios")]
+fn ios_game_runtime_root() -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    Some(executable.parent()?.join("GameRuntime"))
 }
 
 pub(super) struct PclCeJvmOptions<'a> {

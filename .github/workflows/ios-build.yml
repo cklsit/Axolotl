@@ -220,6 +220,29 @@ jobs:
           test -f "$runtime_root/jre21/lib/libjli.dylib"
           du -sh "$runtime_root/jre21"
 
+      - name: Stage the game libraries
+        shell: bash
+        run: |
+          commit=f98c4133c72d39e06ceac42b57cc4477c52105fc
+          base="https://raw.githubusercontent.com/AngelAuraMC/Amethyst-iOS/$commit"
+          runtime_root="$(pwd)/apps/app/gen/apple/GameRuntime"
+          mkdir -p "$runtime_root/libs" "$runtime_root/natives"
+          for jar in lwjgl.jar lwjgl-glfw.jar lwjgl-opengl.jar lwjgl-openal.jar lwjgl-stb.jar lwjgl-tinyfd.jar lwjgl-freetype.jar; do
+            curl -fsSL -o "$runtime_root/libs/$jar" "$base/JavaApp/libs/lwjgl/$jar"
+          done
+          for library in libgl4es_114.dylib libopenal.dylib liblwjgl.dylib liblwjgl_opengl.dylib liblwjgl_stb.dylib liblwjgl_tinyfd.dylib; do
+            curl -fsSL -o "$runtime_root/natives/$library" "$base/Natives/resources/Frameworks/$library"
+          done
+          for framework in libEGL libGLESv2; do
+            mkdir -p "$runtime_root/Frameworks/$framework.framework"
+            curl -fsSL -o "$runtime_root/Frameworks/$framework.framework/Info.plist" "$base/Natives/resources/Frameworks/$framework.framework/Info.plist"
+            curl -fsSL -o "$runtime_root/Frameworks/$framework.framework/$framework" "$base/Natives/resources/Frameworks/$framework.framework/$framework"
+          done
+          test -f "$runtime_root/libs/lwjgl.jar"
+          test -f "$runtime_root/natives/libgl4es_114.dylib"
+          test -f "$runtime_root/Frameworks/libEGL.framework/libEGL"
+          du -sh "$runtime_root/libs" "$runtime_root/natives" "$runtime_root/Frameworks"
+
       - name: Build frontend
         run: pnpm turbo run build --filter=@modrinth/app-frontend
 
