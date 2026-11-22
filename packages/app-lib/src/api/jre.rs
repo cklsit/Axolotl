@@ -570,6 +570,13 @@ pub async fn find_java_for_version(
     // on that runtime even where its manifest asks for a different major version.
     #[cfg(target_os = "ios")]
     if let Some(java) = bundled_java_runtime().await? {
+        if java.parsed_version < major_version {
+            return Err(crate::ErrorKind::LauncherError(format!(
+                "This instance needs Java {major_version}, and this platform ships Java {}. Start an instance the bundled runtime can run.",
+                java.parsed_version
+            ))
+            .as_error());
+        }
         tracing::warn!(
             requested = major_version,
             found = java.parsed_version,

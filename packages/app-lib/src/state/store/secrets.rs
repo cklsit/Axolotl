@@ -421,7 +421,7 @@ pub(crate) struct Refused {
 #[cfg(not(test))]
 struct System;
 
-#[cfg(not(test))]
+#[cfg(all(not(test), not(target_os = "ios")))]
 impl Backend for System {
     fn set(&self, key: &str, value: &str) -> Result<(), Refused> {
         entry(key)?.set_password(value).map_err(refused)
@@ -440,6 +440,73 @@ impl Backend for System {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(refused(error)),
         }
+    }
+}
+
+/// iOS only offers its keychain to applications signed with the matching
+/// entitlement, which a side-loaded build has no way to carry, so the secrets
+/// live in files only this application can read.
+#[cfg(all(not(test), target_os = "ios"))]
+impl Backend for System {
+    fn set(&self, key: &str, value: &str) -> Result<(), Refused> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        let path = secret_path(key)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(store_refused)?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(store_refused)?;
+        file.write_all(value.as_bytes()).map_err(store_refused)
+    }
+
+    fn get(&self, key: &str) -> Result<Option<String>, Refused> {
+        match std::fs::read_to_string(secret_path(key)?) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(None)
+            }
+            Err(error) => Err(store_refused(error)),
+        }
+    }
+
+    fn delete(&self, key: &str) -> Result<(), Refused> {
+        match std::fs::remove_file(secret_path(key)?) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(())
+            }
+            Err(error) => Err(store_refused(error)),
+        }
+    }
+}
+
+/// Where one secret is kept on a platform without a credential store.
+#[cfg(all(not(test), target_os = "ios"))]
+fn secret_path(key: &str) -> Result<std::path::PathBuf, Refused> {
+    use base64::Engine as _;
+
+    let directory = crate::prelude::DirectoryInfo::initial_settings_dir_path(
+        crate::brand::BUNDLE_IDENTIFIER,
+    )
+    .ok_or_else(|| store_refused(std::io::Error::other("no data directory")))?
+    .join("secrets");
+    let name = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(key.as_bytes());
+    Ok(directory.join(name))
+}
+
+#[cfg(all(not(test), target_os = "ios"))]
+fn store_refused(error: std::io::Error) -> Refused {
+    Refused {
+        reason: error.to_string(),
+        permanent: false,
     }
 }
 
