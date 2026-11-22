@@ -75,6 +75,20 @@ impl DirectoryInfo {
     // init() is not needed for this function
     pub fn initial_settings_dir_path(app_identifier: &str) -> Option<PathBuf> {
         Self::env_path("THESEUS_CONFIG_DIR").or_else(|| {
+            // The shared data location on iOS sits under the application support
+            // directory, which a host application may keep out of reach. The
+            // documents directory is writable and readable by the user, so the
+            // launcher keeps its state there.
+            #[cfg(target_os = "ios")]
+            if let Some(home) = std::env::var_os("HOME") {
+                return Some(
+                    PathBuf::from(home)
+                        .join("Documents")
+                        .join(crate::brand::app_data_dir_identifier(
+                            app_identifier,
+                        )),
+                );
+            }
             Some(
                 dirs::data_dir()?.join(crate::brand::app_data_dir_identifier(
                     app_identifier,
