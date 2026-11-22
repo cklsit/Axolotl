@@ -93,6 +93,10 @@ onMounted(async () => {
     const settings = await getSettings()
     nativeDecorations.value = settings.native_decorations
 
+    // A single-window host exposes no window commands, so the controls only
+    // track window state where the platform has a window to track.
+    if (os.value === 'IOS') return
+
     if (os.value !== 'MacOS') {
         await getCurrentWindow().setDecorations(nativeDecorations.value)
     }
@@ -121,6 +125,8 @@ onUnmounted(() => {
 })
 
 const handleClose = async () => {
+    // Nothing to save or close on a host without window commands.
+    if (os.value === 'IOS') return
     await saveWindowState(StateFlags.ALL)
     await getCurrentWindow().close()
 }
