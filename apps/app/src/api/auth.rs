@@ -180,7 +180,6 @@ pub async fn login<R: Runtime>(
         )?),
     )
     .title("Sign into Axolotl Launcher")
-    .center()
     .initialization_script(help_bar_script)
     .on_navigation(move |url| {
         let alternative = match url.host_str() {
@@ -201,11 +200,11 @@ pub async fn login<R: Runtime>(
         true
     });
 
-    // A desktop login window floats above the launcher so the sign-in page stays
-    // reachable; iOS presents one window and has no always-on-top level.
+    // A desktop login window floats above the launcher and centers itself so the
+    // sign-in page stays reachable; iOS presents one full-screen window.
     #[cfg(desktop)]
     {
-        window_builder = window_builder.always_on_top(true);
+        window_builder = window_builder.always_on_top(true).center();
     }
 
     let window = window_builder.build()?;

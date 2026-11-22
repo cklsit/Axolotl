@@ -361,12 +361,15 @@ pub async fn theme_pack_open_page<R: Runtime>(
     // within the pack would let a page with fewer declared requirements take
     // over a bridge session opened for a page with more requirements.
     let allowed_path = format!("/{}/{}", encode_url_segment(&pack_id), entry);
+    #[cfg(desktop)]
     let builder =
         WebviewBuilder::new(label.clone(), WebviewUrl::External(page_url))
             .initialization_script(THEME_PAGE_API)
             .on_navigation(move |url| {
                 is_allowed_page_location(url, &origin_url, &allowed_path)
             });
+    #[cfg(mobile)]
+    let _ = (page_url, origin_url, allowed_path);
     lock_pages(&state)?.insert(
         label.clone(),
         ThemePageOwner {
@@ -387,7 +390,7 @@ pub async fn theme_pack_open_page<R: Runtime>(
     // window and cannot stack a positioned child inside it.
     #[cfg(mobile)]
     {
-        let _ = (builder, webview);
+        let _ = webview;
         lock_pages(&state)?.remove(&label);
         return Err(theme_error(
             "Theme pages are not supported on this platform",
