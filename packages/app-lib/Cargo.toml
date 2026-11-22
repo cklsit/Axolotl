@@ -203,6 +203,8 @@ hickory-resolver = { workspace = true, features = ["system-config"] }
 apple-native-keyring-store = { version = "1.0.1", default-features = false, features = [
   "protected",
 ] }
+# Descriptor handling for the runtime that the launcher hosts in its own process.
+libc = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cidre = { workspace = true, features = ["blocks", "nw"] }
