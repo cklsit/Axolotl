@@ -12,6 +12,7 @@
 // directory; both are copied in here so the Xcode project stays a build output.
 
 import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 
 const projectRoot = resolve('.')
@@ -50,6 +51,23 @@ await writeFile(projectFile, patched)
 await mkdir(bridgeTarget, { recursive: true })
 for (const entry of await readdir(bridgeSource)) {
     await cp(join(bridgeSource, entry), join(bridgeTarget, entry))
+}
+
+// The runtime folder is filled with the bundled Java runtime after this script
+// runs, so only the reference needs to exist for the project to generate.
+await mkdir(join(appleDir, 'GameRuntime'), { recursive: true })
+
+// The project file was generated before the bridge sources and the runtime
+// folder existed, so it has to be regenerated from the patched description.
+const generated = spawnSync('xcodegen', ['generate'], {
+    cwd: appleDir,
+    stdio: 'inherit',
+})
+if (generated.error) {
+    throw generated.error
+}
+if (generated.status !== 0) {
+    throw new Error(`xcodegen generate exited with ${generated.status}`)
 }
 
 console.log(`Patched ${projectFile}`)
