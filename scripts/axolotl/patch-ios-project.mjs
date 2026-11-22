@@ -11,7 +11,7 @@
 // The bridge sources and the bundled game runtime live outside the generated
 // directory; both are copied in here so the Xcode project stays a build output.
 
-import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 
@@ -20,6 +20,10 @@ const appleDir = join(projectRoot, 'apps/app/gen/apple')
 const projectFile = join(appleDir, 'project.yml')
 const bridgeSource = join(projectRoot, 'apps/app/ios')
 const bridgeTarget = join(appleDir, 'Sources/launcher')
+// Only the loader is compiled into the application. The game runtime, which
+// serves the symbols the game resolves by name, is built as its own library so
+// the game and the launcher share one copy of it.
+const bridgeFiles = ['AxolotlLoader.m', 'AxolotlRuntime.h']
 
 const projectReplacements = [
     ['libapp.a', 'libtheseus_gui.a'],
@@ -59,7 +63,7 @@ for (const [from, to] of projectReplacements) {
 await writeFile(projectFile, patched)
 
 await mkdir(bridgeTarget, { recursive: true })
-for (const entry of await readdir(bridgeSource)) {
+for (const entry of bridgeFiles) {
     await cp(join(bridgeSource, entry), join(bridgeTarget, entry))
 }
 

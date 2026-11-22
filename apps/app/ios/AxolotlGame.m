@@ -716,41 +716,14 @@ void axolotl_game_finish(void) {
 
 int axolotl_game_prepare(const char *runtime_directory) {
     @autoreleasepool {
-        if (runtime_directory == NULL) {
-            return -1;
-        }
-        // The windowing library loads its native side from the fixed path
-        // `<bundle path>/AngelAuraAmethyst`. The directory the launch hands over
-        // carries a link with that name, which resolves to the running
-        // executable, so the load finds the image that is already in memory.
-        NSString *directory =
-            [NSString stringWithUTF8String:runtime_directory];
-        NSError *error = nil;
-        if (![NSFileManager.defaultManager
-                createDirectoryAtPath:directory
-          withIntermediateDirectories:YES
-                           attributes:nil
-                                error:&error]) {
-            NSLog(@"[Axolotl] Could not create the runtime directory: %@",
-                  error);
-            return -2;
-        }
-        NSString *link = [directory stringByAppendingPathComponent:
-                                         @"AngelAuraAmethyst"];
-        NSString *executable = [NSBundle.mainBundle executablePath];
-        if (![NSFileManager.defaultManager
-                createSymbolicLinkAtPath:link
-                     withDestinationPath:executable
-                                   error:&error]) {
-            // An existing link is expected on later launches.
-            if (![NSFileManager.defaultManager fileExistsAtPath:link]) {
-                NSLog(@"[Axolotl] Could not link the launcher executable: %@",
-                      error);
-                return -3;
-            }
-        }
-        setenv("BUNDLE_PATH", directory.UTF8String, 1);
-        ax_log(@"The runtime directory serves the windowing library");
+        (void)runtime_directory;
+        // The game loads its windowing symbols from `<bundle path>/AngelAuraAmethyst`,
+        // and this library is that file, so the bundle's runtime directory is the
+        // path it has to open.
+        NSString *runtime = [[NSBundle.mainBundle.bundlePath
+            stringByAppendingPathComponent:@"GameRuntime"] retain];
+        setenv("BUNDLE_PATH", runtime.UTF8String, 1);
+        ax_log(@"The game runtime library serves the windowing symbols");
         return 0;
     }
 }

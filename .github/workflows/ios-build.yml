@@ -282,6 +282,27 @@ jobs:
             -o "$runtime_root/natives/libtinygl4angle.dylib"
           test -f "$runtime_root/natives/libtinygl4angle.dylib"
 
+      - name: Build the game runtime library
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          runtime_root="$(pwd)/apps/app/gen/apple/GameRuntime"
+          source="$(pwd)/apps/app/ios"
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          # The library carries every symbol the game resolves by name, including
+          # the windowing and graphics entry points and the launch calls, so the
+          # launcher and the game share one copy of the runtime.
+          clang -dynamiclib -arch arm64 -isysroot "$sdk" -mios-version-min=16.0 \
+            -fobjc-arc -I"$source" \
+            -F"$runtime_root/Frameworks" -framework libEGL -framework libGLESv2 \
+            -Wl,-rpath,@loader_path/Frameworks \
+            -framework Foundation -framework UIKit -framework QuartzCore \
+            -framework Metal \
+            "$source/AxolotlGame.m" "$source/AxolotlControls.m" \
+            "$source/AxolotlJVM.m" \
+            -o "$runtime_root/AngelAuraAmethyst"
+          test -f "$runtime_root/AngelAuraAmethyst"
+
       - name: Sign the staged runtime
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -290,11 +311,12 @@ jobs:
           # The runtime ships as code the application loads at run time, so each
           # binary needs its own signature. Signing happens on the staged files
           # because the bundle copies them verbatim.
-          find "$runtime_root" -type f \( -name '*.dylib' -o -path '*.framework/lib*' \) -print0 |
+          find "$runtime_root" -type f \( -name '*.dylib' -o -name 'AngelAuraAmethyst' -o -path '*.framework/lib*' \) -print0 |
             while IFS= read -r -d '' binary; do
               codesign --force --sign - --timestamp=none "$binary"
             done
           find "$runtime_root" -name '*.dylib' | wc -l
+          codesign --verify --strict "$runtime_root/AngelAuraAmethyst"
           codesign --verify --strict "$runtime_root/natives/libgl4es_114.dylib"
           codesign --verify --strict "$runtime_root/natives/libtinygl4angle.dylib"
           codesign --verify --strict "$runtime_root/Frameworks/libEGL.framework/libEGL"
@@ -330,6 +352,7 @@ jobs:
           unzip -q "$ipa" -d "$RUNNER_TEMP/payload"
           app="$(find "$RUNNER_TEMP/payload/Payload" -maxdepth 1 -name '*.app' -print -quit)"
           echo "app=$app" >> "$GITHUB_STEP_SUMMARY"
+          test -f "$app/GameRuntime/AngelAuraAmethyst"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist"
           if [ -d "$app/_CodeSignature" ]; then
