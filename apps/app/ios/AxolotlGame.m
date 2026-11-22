@@ -107,6 +107,9 @@ static AxolotlGameView *g_game_view;
 static NSInteger g_window_width = 854;
 static NSInteger g_window_height = 480;
 
+/// Overlay carrying the on-screen controls, above the drawing surface.
+UIView *axolotl_controls_view(CGRect bounds);
+
 /// A context bundle owns one surface and one context; the game identifies the
 /// window it draws to by this pointer.
 typedef struct {
@@ -132,6 +135,10 @@ static void axolotl_show_game_window(void) {
         view.autoresizingMask = UIViewAutoresizingFlexibleWidth |
                                 UIViewAutoresizingFlexibleHeight;
         [controller.view addSubview:view];
+        UIView *controls = axolotl_controls_view(window.bounds);
+        controls.autoresizingMask = UIViewAutoresizingFlexibleWidth |
+                                    UIViewAutoresizingFlexibleHeight;
+        [controller.view addSubview:controls];
         window.rootViewController = controller;
         window.hidden = NO;
         [window makeKeyAndVisible];
@@ -294,6 +301,7 @@ AX_PUBLIC intptr_t pojavCreateContext(intptr_t share) {
         return 0;
     }
 
+    g_showing_window = (intptr_t)window;
     return (intptr_t)window;
 }
 
@@ -329,9 +337,8 @@ AX_PUBLIC void pojavSwapInterval(int interval) {
 }
 
 AX_PUBLIC void pojavPumpEvents(intptr_t window) {
-    (void)window;
-    // Input is delivered by the view's own gestures; a poll has nothing to drain
-    // until the gesture handling is connected.
+    g_showing_window = window;
+    axolotl_input_pump();
 }
 
 AX_PUBLIC void pojavRewindEvents(void) {}
@@ -368,6 +375,117 @@ typedef struct {
 } AXCallbacks;
 
 static AXCallbacks g_callbacks;
+
+#pragma mark - Input queue
+
+typedef struct {
+    int type;
+    int i1;
+    int i2;
+    int i3;
+    int i4;
+    double f1;
+    double f2;
+} AXInputEvent;
+
+enum {
+    AX_EVENT_CURSOR_POS = 1003,
+    AX_EVENT_KEY = 1005,
+    AX_EVENT_MOUSE_BUTTON = 1006,
+    AX_EVENT_SCROLL = 1007,
+};
+
+static AXInputEvent g_events[512];
+static int g_event_count;
+static NSLock *g_event_lock;
+static intptr_t g_showing_window;
+static double g_cursor_x = 512;
+static double g_cursor_y = 384;
+
+static void axolotl_input_push(AXInputEvent event) {
+    static NSLock *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        lock = [[NSLock alloc] init];
+        g_event_lock = lock;
+    });
+    [lock lock];
+    if (g_event_count < (int)(sizeof(g_events) / sizeof(g_events[0]))) {
+        g_events[g_event_count++] = event;
+    }
+    [lock unlock];
+}
+
+void axolotl_game_post_key(int key, int action) {
+    AXInputEvent event = {0};
+    event.type = AX_EVENT_KEY;
+    event.i1 = key;
+    event.i3 = action;
+    axolotl_input_push(event);
+}
+
+void axolotl_game_post_mouse(int button, int action) {
+    AXInputEvent event = {0};
+    event.type = AX_EVENT_MOUSE_BUTTON;
+    event.i1 = button;
+    event.i2 = action;
+    axolotl_input_push(event);
+}
+
+void axolotl_game_move_cursor(double delta_x, double delta_y) {
+    g_cursor_x += delta_x;
+    g_cursor_y += delta_y;
+    AXInputEvent event = {0};
+    event.type = AX_EVENT_CURSOR_POS;
+    event.f1 = g_cursor_x;
+    event.f2 = g_cursor_y;
+    axolotl_input_push(event);
+}
+
+/// Hands the queued events to the callbacks the game registered.
+static void axolotl_input_pump(void) {
+    AXInputEvent batch[512];
+    int count = 0;
+    if (g_event_lock != nil) {
+        [g_event_lock lock];
+        count = g_event_count;
+        memcpy(batch, g_events, (size_t)count * sizeof(AXInputEvent));
+        g_event_count = 0;
+        [g_event_lock unlock];
+    }
+    void *window = (void *)g_showing_window;
+    for (int index = 0; index < count; index++) {
+        AXInputEvent event = batch[index];
+        switch (event.type) {
+        case AX_EVENT_KEY:
+            if (g_callbacks.key != 0) {
+                ((void (*)(void *, int, int, int, int))g_callbacks.key)(
+                    window, event.i1, event.i2, event.i3, event.i4);
+            }
+            break;
+        case AX_EVENT_MOUSE_BUTTON:
+            if (g_callbacks.mouse_button != 0) {
+                ((void (*)(void *, int, int, int))g_callbacks.mouse_button)(
+                    window, event.i1, event.i2, event.i3);
+            }
+            break;
+        case AX_EVENT_CURSOR_POS:
+            if (g_callbacks.cursor_position != 0) {
+                ((void (*)(void *, double, double))g_callbacks
+                     .cursor_position)(window, event.f1, event.f2);
+            }
+            break;
+        case AX_EVENT_SCROLL:
+            if (g_callbacks.scroll != 0) {
+                ((void (*)(void *, double, double))g_callbacks.scroll)(
+                    window, event.f1, event.f2);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+}
 
 AX_PUBLIC long long
 Java_org_lwjgl_glfw_GLFW_nglfwSetCharCallback(void *env,
