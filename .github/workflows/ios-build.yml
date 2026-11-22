@@ -297,7 +297,7 @@ jobs:
             -F"$runtime_root/Frameworks" -framework libEGL -framework libGLESv2 \
             -Wl,-rpath,@loader_path/Frameworks \
             -framework Foundation -framework UIKit -framework QuartzCore \
-            -framework Metal \
+            -framework Metal -framework CoreGraphics -framework CoreFoundation \
             "$source/AxolotlGame.m" "$source/AxolotlControls.m" \
             "$source/AxolotlJVM.m" \
             -o "$runtime_root/AngelAuraAmethyst"
