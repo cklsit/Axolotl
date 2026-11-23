@@ -16,6 +16,11 @@ on:
       - ios/port
     paths:
       - '.github/workflows/ios-build.yml'
+      - 'apps/app/**'
+      - 'packages/app-lib/**'
+      - 'packages/ui/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 permissions:
   contents: read
@@ -30,7 +35,7 @@ env:
 jobs:
   probe:
     name: Probe iOS target compilation
-    if: inputs.stage == 'probe' || github.event_name == 'push'
+    if: inputs.stage == 'probe'
     runs-on: macos-15
     timeout-minutes: 90
     steps:
@@ -142,7 +147,7 @@ jobs:
 
   package:
     name: Package unsigned iOS app
-    if: inputs.stage == 'package'
+    if: inputs.stage == 'package' || github.event_name == 'push'
     runs-on: macos-15
     timeout-minutes: 120
     permissions:
