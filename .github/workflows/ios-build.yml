@@ -373,6 +373,7 @@ jobs:
       - name: Publish the installable package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IPA_URL: https://github.com/${{ github.repository }}/releases/download/ios-latest/Axolotl-ios.ipa
         shell: bash
         run: |
           ipa="$(cat "$RUNNER_TEMP/ipa-path")"
@@ -390,9 +391,22 @@ jobs:
           fi
           cp "$ipa" "$RUNNER_TEMP/Axolotl-ios.ipa"
           gh release upload "$tag" "$RUNNER_TEMP/Axolotl-ios.ipa" --clobber
+          # A short description of the newest build lets the device decide whether
+          # it already has it without reading the whole release.
+          node -e '
+            const { writeFileSync } = require("node:fs");
+            writeFileSync(process.argv[1], JSON.stringify({
+              build: Number(process.env.GITHUB_RUN_NUMBER),
+              commit: process.env.GITHUB_SHA,
+              ipa_url: process.env.IPA_URL,
+              published_at: new Date().toISOString(),
+            }, null, 2) + "\n");
+          ' "$RUNNER_TEMP/latest.json"
+          gh release upload "$tag" "$RUNNER_TEMP/latest.json" --clobber
           echo "install_url=$url" >> "$GITHUB_STEP_SUMMARY"
           curl -fsSL -o "$RUNNER_TEMP/published.ipa" "$url"
           cmp "$RUNNER_TEMP/published.ipa" "$RUNNER_TEMP/Axolotl-ios.ipa"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/latest.json"
 
       - name: Upload build log
         if: always()
