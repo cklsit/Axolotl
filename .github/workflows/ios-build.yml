@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: ios-build-${{ github.event_name }}-${{ github.ref }}
@@ -422,3 +423,39 @@ jobs:
           overwrite: true
           retention-days: 7
           if-no-files-found: warn
+
+  recover:
+    name: Ask for a runner again
+    needs: package
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+    steps:
+      - name: Rerun the package job when no runner was assigned
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          # A macOS runner can be refused before any step runs, which leaves a
+          # cancelled job and reports the build as failed. Asking again is the
+          # only remedy from outside, so a job that never started is rerun a
+          # bounded number of times.
+          set -euo pipefail
+          if [ "$ATTEMPT" -ge 4 ]; then
+            echo "This run already ran $ATTEMPT times; leaving it alone."
+            exit 0
+          fi
+          reached="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" \
+            --jq '[.jobs[].steps[] | select(.conclusion != null)] | length')"
+          if [ "$reached" -gt 0 ]; then
+            echo "The package job reached its steps, so the failure is its own."
+            exit 0
+          fi
+          echo "The package job never reached a step; asking for a runner again."
+          gh api --method POST "repos/$REPOSITORY/actions/runs/$RUN_ID/rerun" \
+            -F enable_debug_logging=false
