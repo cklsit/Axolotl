@@ -429,7 +429,7 @@ jobs:
     needs: package
     # A refused runner ends the package job as cancelled rather than failed, and
     # a job that needs a cancelled one is skipped unless it asks to run anyway.
-    if: always() && needs.package.result != 'success' && github.event_name == 'push'
+    if: always() && needs.package.result != 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -446,12 +446,20 @@ jobs:
           # A refused runner leaves the package job cancelled before any step
           # runs, which reports a failed build that never executed. The run
           # itself cannot be restarted while it is still running, so a new run of
-          # the same workflow takes over; a real failure leaves it alone.
+          # the same workflow takes over. A real failure leaves it alone, and a
+          # stretch of refusals ends the chain instead of growing without bound.
           set -euo pipefail
           reached="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" \
             --jq '[.jobs[].steps[] | select(.conclusion != null)] | length')"
           if [ "$reached" -gt 0 ]; then
             echo "The package job reached its steps, so the failure is its own."
+            exit 0
+          fi
+          refusals="$(gh api \
+            "repos/$REPOSITORY/actions/workflows/ios-build.yml/runs?per_page=8" \
+            --jq '[.workflow_runs[] | select(.conclusion == "failure")] | length')"
+          if [ "$refusals" -ge 4 ]; then
+            echo "$refusals recent builds failed; the runner capacity is the limit."
             exit 0
           fi
           echo "The package job never reached a step; starting a new build."
