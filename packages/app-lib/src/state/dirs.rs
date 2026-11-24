@@ -114,6 +114,18 @@ impl DirectoryInfo {
             ))
         })?;
 
+        // A mobile platform gives the application one writable container per
+        // installation, and its location changes when the application is
+        // installed again. A root recorded by an earlier installation therefore
+        // names a directory the process cannot reach, which surfaces as an
+        // unreadable error at the first instance. The container the launcher is
+        // running in is the only durable answer, so it is the one used.
+        #[cfg(target_os = "ios")]
+        let config_dir = {
+            let _ = config_dir;
+            settings_dir.clone()
+        };
+        #[cfg(not(target_os = "ios"))]
         let config_dir =
             config_dir.map_or_else(|| settings_dir.clone(), PathBuf::from);
 
@@ -377,6 +389,27 @@ impl DirectoryInfo {
                 "Could not find valid config dir".to_string(),
             ))?;
 
+        // A platform that keeps each installation in its own container can leave
+        // a recorded directory that belongs to no existing container: it exists
+        // nowhere and refuses every write, so the first instance creation fails
+        // with a permission error. The application directory is always
+        // available, so an unusable record is replaced before anything reads it.
+        #[cfg(target_os = "ios")]
+        {
+            if settings.custom_dir.as_deref()
+                != Some(app_dir.to_string_lossy().as_ref())
+            {
+                tracing::warn!(
+                    recorded = ?settings.custom_dir,
+                    fallback = %app_dir.display(),
+                    "A launcher directory recorded by an earlier installation is unreachable; using the application directory"
+                );
+            }
+            settings.custom_dir =
+                Some(app_dir.to_string_lossy().to_string());
+            settings.prev_custom_dir.clone_from(&settings.custom_dir);
+        }
+
         if let Some(ref prev_custom_dir) = settings.prev_custom_dir {
             let prev_dir = PathBuf::from(prev_custom_dir);
 
@@ -388,16 +421,23 @@ impl DirectoryInfo {
             async fn is_dir_writable(
                 new_config_dir: &Path,
             ) -> crate::Result<bool> {
-                let temp_path = new_config_dir.join(".tmp");
-                match fs::write(temp_path.clone(), "test").await {
-                    Ok(_) => {
-                        fs::remove_file(temp_path).await?;
+                if crate::util::io::create_dir_all(new_config_dir)
+                    .await
+                    .is_err()
+                {
+                    return Ok(false);
+                }
+                let probe = new_config_dir.join(".write-check");
+                match fs::write(&probe, b"").await {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&probe).await;
                         Ok(true)
                     }
-                    Err(e) => {
-                        tracing::error!(
-                            "Error writing to new config dir: {}",
-                            e
+                    Err(error) => {
+                        tracing::warn!(
+                            path = %new_config_dir.display(),
+                            %error,
+                            "Launcher directory refused a write"
                         );
                         Ok(false)
                     }

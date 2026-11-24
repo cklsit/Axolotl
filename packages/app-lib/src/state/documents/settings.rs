@@ -4169,35 +4169,52 @@ pub(crate) async fn content_root_before_state(
     root: &Path,
     documents: &Documents<'_>,
 ) -> crate::Result<std::path::PathBuf> {
-    let mut values = default_values()?;
-    match documents.shipped_keys("bootstrap", 1).await {
-        Shipped::Keys(provided) => {
-            overlay(&mut values, &["custom_dir"], &provided, "bootstrap");
-        }
-        Shipped::Unreadable => {
-            return Err(crate::ErrorKind::FSError(
-                "Deployment storage bootstrap is unavailable".into(),
-            )
-            .into());
-        }
-        Shipped::Missing => {}
+    // A mobile platform moves the application container on every install, so a
+    // root an earlier installation recorded names a directory this process
+    // cannot reach. The container it runs in is the only one it can use.
+    #[cfg(target_os = "ios")]
+    {
+        let _ = documents;
+        return Ok(root.to_owned());
     }
-    match documents.stored::<Document>("bootstrap", 1).await {
-        Stored::Ready { document, .. } | Stored::Newer { document, .. } => {
-            overlay(&mut values, &["custom_dir"], &document, "bootstrap")
+    #[cfg(not(target_os = "ios"))]
+    {
+        let mut values = default_values()?;
+        match documents.shipped_keys("bootstrap", 1).await {
+            Shipped::Keys(provided) => {
+                overlay(&mut values, &["custom_dir"], &provided, "bootstrap");
+            }
+            Shipped::Unreadable => {
+                return Err(crate::ErrorKind::FSError(
+                    "Deployment storage bootstrap is unavailable".into(),
+                )
+                .into());
+            }
+            Shipped::Missing => {}
         }
-        Stored::Unreadable => {
-            return Err(crate::ErrorKind::FSError(
-                "Storage bootstrap document unavailable".into(),
-            )
-            .into());
+        match documents.stored::<Document>("bootstrap", 1).await {
+            Stored::Ready { document, .. }
+            | Stored::Newer { document, .. } => {
+                overlay(
+                    &mut values,
+                    &["custom_dir"],
+                    &document,
+                    "bootstrap",
+                )
+            }
+            Stored::Unreadable => {
+                return Err(crate::ErrorKind::FSError(
+                    "Storage bootstrap document unavailable".into(),
+                )
+                .into());
+            }
+            Stored::Missing => {}
         }
-        Stored::Missing => {}
+        Ok(values
+            .get("custom_dir")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| root.to_owned()))
     }
-    Ok(values
-        .get("custom_dir")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.to_owned()))
 }
