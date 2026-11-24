@@ -427,7 +427,9 @@ jobs:
   recover:
     name: Ask for a runner again
     needs: package
-    if: failure()
+    # A refused runner ends the package job as cancelled rather than failed, and
+    # a job that needs a cancelled one is skipped unless it asks to run anyway.
+    if: always() && needs.package.result != 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -457,5 +459,5 @@ jobs:
             exit 0
           fi
           echo "The package job never reached a step; asking for a runner again."
-          gh api --method POST "repos/$REPOSITORY/actions/runs/$RUN_ID/rerun" \
-            -F enable_debug_logging=false
+          gh api --method POST \
+            "repos/$REPOSITORY/actions/runs/$RUN_ID/rerun-failed-jobs"
