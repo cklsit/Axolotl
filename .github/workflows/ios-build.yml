@@ -429,35 +429,31 @@ jobs:
     needs: package
     # A refused runner ends the package job as cancelled rather than failed, and
     # a job that needs a cancelled one is skipped unless it asks to run anyway.
-    if: always() && needs.package.result != 'success'
+    if: always() && needs.package.result != 'success' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       actions: write
     steps:
-      - name: Rerun the package job when no runner was assigned
+      - name: Start a new build when no runner was assigned
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          ATTEMPT: ${{ github.run_attempt }}
+          REF: ${{ github.ref_name }}
         shell: bash
         run: |
-          # A macOS runner can be refused before any step runs, which leaves a
-          # cancelled job and reports the build as failed. Asking again is the
-          # only remedy from outside, so a job that never started is rerun a
-          # bounded number of times.
+          # A refused runner leaves the package job cancelled before any step
+          # runs, which reports a failed build that never executed. The run
+          # itself cannot be restarted while it is still running, so a new run of
+          # the same workflow takes over; a real failure leaves it alone.
           set -euo pipefail
-          if [ "$ATTEMPT" -ge 4 ]; then
-            echo "This run already ran $ATTEMPT times; leaving it alone."
-            exit 0
-          fi
           reached="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" \
             --jq '[.jobs[].steps[] | select(.conclusion != null)] | length')"
           if [ "$reached" -gt 0 ]; then
             echo "The package job reached its steps, so the failure is its own."
             exit 0
           fi
-          echo "The package job never reached a step; asking for a runner again."
-          gh api --method POST \
-            "repos/$REPOSITORY/actions/runs/$RUN_ID/rerun-failed-jobs"
+          echo "The package job never reached a step; starting a new build."
+          gh workflow run "iOS build" --repo "$REPOSITORY" --ref "$REF" \
+            -f stage=package
